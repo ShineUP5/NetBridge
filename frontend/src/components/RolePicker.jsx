@@ -1,13 +1,13 @@
 const ROLES = [
   {
     id: 'gateway',
-    title: 'I share',
-    description: 'Share internet from my computer',
+    title: 'SERVER',
+    description: 'Share internet from this computer',
   },
   {
     id: 'dependant',
-    title: 'I join',
-    description: 'Join a friend’s shared internet',
+    title: 'DEPENDENT',
+    description: 'Connect with a friend’s code',
   },
 ]
 

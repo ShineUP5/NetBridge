@@ -2,8 +2,8 @@ import { Brand } from './Brand'
 import { Button } from './Button'
 
 function roleLabel(role) {
-  if (role === 'gateway') return 'Sharing'
-  if (role === 'dependant') return 'Joining'
+  if (role === 'gateway') return 'SERVER'
+  if (role === 'dependant') return 'DEPENDENT'
   return role
 }
 

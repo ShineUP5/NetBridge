@@ -8,7 +8,7 @@ export function UserFacts({ user }) {
         <strong>Email</strong> {user.email}
       </li>
       <li>
-        <strong>Role</strong> {user.role === 'gateway' ? 'Gateway' : 'Dependant'}
+        <strong>Role</strong> {user.role === 'gateway' ? 'SERVER' : 'DEPENDENT'}
       </li>
     </ul>
   )

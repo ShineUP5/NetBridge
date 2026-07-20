@@ -66,7 +66,7 @@ export default function SignupPage() {
       <form className="card-form" onSubmit={onSubmit}>
         <Brand />
         <h1>Sign up</h1>
-        <p className="lead">Pick how you will use NetBridge.</p>
+        <p className="lead">Choose SERVER or DEPENDENT.</p>
 
         <RolePicker
           value={form.role}
