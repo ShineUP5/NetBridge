@@ -77,9 +77,17 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
+_database_url = (os.getenv("DATABASE_URL") or "").strip().strip('"').strip("'")
+if not _database_url or "://" not in _database_url or _database_url.startswith("://"):
+    raise RuntimeError(
+        "DATABASE_URL is missing or invalid on this server. "
+        "Set it in Render Environment to your full Neon URL, e.g. "
+        "postgresql://USER:PASSWORD@HOST/neondb?sslmode=require"
+    )
+
 DATABASES = {
-    "default": dj_database_url.config(
-        default=os.getenv("DATABASE_URL"),
+    "default": dj_database_url.parse(
+        _database_url,
         conn_max_age=600,
         ssl_require=True,
     )
