@@ -577,42 +577,64 @@ try {
     }
 
     # Windows ignores SSID/password changes while Mobile Hotspot is already On.
-    # Stop first, then configure, then start — otherwise phones get "incorrect password".
-    if ([string]$tm.TetheringOperationalState -eq 'On') {
-      Stop-Tethering $tm
-      Start-Sleep -Milliseconds 800
-    }
+    # If the radio already has the same credentials, leave it alone so phones keep seeing the network.
+    $alreadyOn = ([string]$tm.TetheringOperationalState -eq 'On')
+    $cfgNow = $tm.GetCurrentAccessPointConfiguration()
+    $ssidNow = [string]$cfgNow.Ssid
+    $passNow = ''
+    try { $passNow = [string]$cfgNow.Passphrase } catch { $passNow = '' }
+    $sameCreds = ($ssidNow -eq $Ssid) -and (-not $passNow -or $passNow -eq $Password)
 
-    $cfg = $tm.GetCurrentAccessPointConfiguration()
-    $cfg.Ssid = $Ssid
-    $cfg.Passphrase = $Password
-    $coverage = Optimize-Coverage $cfg
-    try {
-      $op = $tm.ConfigureAccessPointAsync($cfg)
-      Await-WinRt $op
-    } catch {
-      throw "Could not set shared WiFi name/password. Try Start sharing again."
-    }
-
-    $applied = $false
-    $deadline = (Get-Date).AddSeconds(8)
-    while ((Get-Date) -lt $deadline) {
-      if (Test-HotspotCredentialsApplied $tm $Ssid $Password) {
-        $applied = $true
-        break
+    if ($alreadyOn -and $sameCreds) {
+      $cfg = $cfgNow
+      # Do not reconfigure or restart — keep the SSID visible and stable for phones.
+      try {
+        $bandRaw = [string]$cfg.Band
+        if ($bandRaw -match 'TwoPointFour|^\s*1\s*$') { $coverage.band = '2.4 GHz' }
+        elseif ($bandRaw -match 'Five|^\s*2\s*$') { $coverage.band = '5 GHz' }
+        elseif ($bandRaw -match 'Six|^\s*3\s*$') { $coverage.band = '6 GHz' }
+      } catch { }
+      $privacy = Get-PrivacyStatusQuick -uplinkAlias $uplink.alias
+      if (-not $privacy.privacy_shield_active) {
+        $privacy = Apply-PrivacyShield -uplinkAlias $uplink.alias
       }
-      Start-Sleep -Milliseconds 400
-    }
-    if (-not $applied) {
-      throw "Windows did not accept the new WiFi password. Open Settings > Network & internet > Mobile hotspot, turn it Off, then tap Start sharing again."
-    }
+    } else {
+      if ($alreadyOn) {
+        Stop-Tethering $tm
+        Start-Sleep -Milliseconds 800
+      }
 
-    Start-Tethering $tm
-    Start-Sleep -Milliseconds 1000
-    if (-not (Test-HotspotCredentialsApplied $tm $Ssid $Password)) {
-      throw "Shared WiFi started, but the password did not stick. Turn Mobile hotspot Off in Windows Settings, then tap Start sharing again."
+      $cfg = $tm.GetCurrentAccessPointConfiguration()
+      $cfg.Ssid = $Ssid
+      $cfg.Passphrase = $Password
+      $coverage = Optimize-Coverage $cfg
+      try {
+        $op = $tm.ConfigureAccessPointAsync($cfg)
+        Await-WinRt $op
+      } catch {
+        throw "Could not set shared WiFi name/password. Try Start sharing again."
+      }
+
+      $applied = $false
+      $deadline = (Get-Date).AddSeconds(8)
+      while ((Get-Date) -lt $deadline) {
+        if (Test-HotspotCredentialsApplied $tm $Ssid $Password) {
+          $applied = $true
+          break
+        }
+        Start-Sleep -Milliseconds 400
+      }
+      if (-not $applied) {
+        throw "Windows did not accept the new WiFi password. Open Settings > Network & internet > Mobile hotspot, turn it Off, then tap Start sharing again."
+      }
+
+      Start-Tethering $tm
+      Start-Sleep -Milliseconds 1000
+      if (-not (Test-HotspotCredentialsApplied $tm $Ssid $Password)) {
+        throw "Shared WiFi started, but the password did not stick. Turn Mobile hotspot Off in Windows Settings, then tap Start sharing again."
+      }
+      $privacy = Apply-PrivacyShield -uplinkAlias $uplink.alias
     }
-    $privacy = Apply-PrivacyShield -uplinkAlias $uplink.alias
   }
 
   if ($Action -eq 'stop') {

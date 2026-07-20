@@ -28,17 +28,24 @@ export default function GatewayPage() {
   const [busyRequestId, setBusyRequestId] = useState(null)
 
   const pollTick = useRef(0)
+  const rotateInFlight = useRef(false)
 
   const rotateWifiPassword = useCallback(async () => {
-    const health = await agentApi.health()
-    if (!health?.ok) {
-      throw new Error(
-        'Start the NetBridge helper as Administrator so the WiFi password can change and kick the friend offline.',
-      )
+    if (rotateInFlight.current) return null
+    rotateInFlight.current = true
+    try {
+      const health = await agentApi.health()
+      if (!health?.ok) {
+        throw new Error(
+          'Start the NetBridge helper as Administrator so the WiFi password can change and kick the friend offline.',
+        )
+      }
+      const result = await agentApi.ensureWifi(token, status?.device_name, { rotate: true })
+      if (result?.cloud) setStatus(result.cloud)
+      return result
+    } finally {
+      rotateInFlight.current = false
     }
-    const result = await agentApi.ensureWifi(token, status?.device_name)
-    if (result?.cloud) setStatus(result.cloud)
-    return result
   }, [token, status?.device_name])
 
   const refresh = useCallback(async () => {
@@ -55,13 +62,6 @@ export default function GatewayPage() {
           setAgentOnline(true)
           if (synced?.cloud) {
             setStatus(synced.cloud)
-            if (Number(synced.cloud.sessions_expired || 0) > 0) {
-              try {
-                await agentApi.ensureWifi(token, synced.cloud.device_name)
-              } catch {
-                // Timed-out friends already lost credentials; password rotate is best-effort.
-              }
-            }
           }
         } catch {
           const health = await agentApi.health()
@@ -79,7 +79,8 @@ export default function GatewayPage() {
       setPending(Array.isArray(pendingRequests) ? pendingRequests : [])
       setConnected(connectedPayload.dependants)
 
-      if (connectedPayload.sessions_expired > 0 && healthOk) {
+      // Rotate at most once when sessions expire — never bounce the hotspot every poll.
+      if (connectedPayload.sessions_expired > 0 && healthOk && !rotateInFlight.current) {
         try {
           await rotateWifiPassword()
         } catch {

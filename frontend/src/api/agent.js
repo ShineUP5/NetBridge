@@ -84,12 +84,12 @@ export const agentApi = {
     }
   },
   status: (token) => agentRequest('/status', { token, timeoutMs: 10000 }),
-  ensureWifi: (token, deviceName) =>
+  ensureWifi: (token, deviceName, { rotate = false } = {}) =>
     agentRequest('/ensure-wifi', {
       method: 'POST',
       token,
       timeoutMs: 45000,
-      body: { token, device_name: deviceName },
+      body: { token, device_name: deviceName, rotate },
     }),
   connect: (token, deviceName) =>
     agentRequest('/connect', {

@@ -80,7 +80,14 @@ def sync_gateway_from_agent(user, payload: dict):
         device.coverage_notes = payload.get("coverage_notes") or device.coverage_notes
     device.agent_last_seen = now
 
-    if want_connected:
+    # Keep sharing stable: do not flap offline when privacy flags briefly miss on a status poll.
+    # Only treat the gateway as down when the hotspot itself is off (or internet is gone).
+    if hotspot_active and has_internet:
+        if not device.is_connected:
+            device.connected_at = now
+        device.is_connected = True
+        device.disconnected_at = None
+    elif want_connected:
         if not device.is_connected:
             device.connected_at = now
         device.is_connected = True
@@ -90,7 +97,8 @@ def sync_gateway_from_agent(user, payload: dict):
         if was_connected:
             device.disconnected_at = now
         device.is_connected = False
-        if was_connected or not hotspot_active:
+        # Only kick friends when the radio is actually off — not on soft privacy glitches.
+        if was_connected and not hotspot_active:
             ConnectionRequest.objects.filter(
                 gateway=user,
                 status=ConnectionRequest.Status.CONNECTED,

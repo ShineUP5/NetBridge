@@ -39,11 +39,35 @@ STATE_LOCK = threading.Lock()
 HOTSPOT_LOCK = threading.Lock()
 STATUS_CACHE_LOCK = threading.Lock()
 STATUS_CACHE: dict = {"at": 0.0, "payload": None}
-STATUS_CACHE_TTL_SEC = 4.0
+STATUS_CACHE_TTL_SEC = 12.0
+STATUS_CACHE_TTL_ACTIVE_SEC = 20.0
 STATE = {
     "auth_token": None,
     "device_name": None,
+    "hotspot_ssid": None,
+    "hotspot_password": None,
 }
+
+
+def remember_credentials(ssid: str | None, password: str | None) -> None:
+    with STATE_LOCK:
+        if ssid:
+            STATE["hotspot_ssid"] = ssid
+        if password:
+            STATE["hotspot_password"] = password
+
+
+def merge_known_credentials(local: dict) -> dict:
+    """Status polls often omit the passphrase — keep the last verified password."""
+    merged = dict(local or {})
+    with STATE_LOCK:
+        known_ssid = STATE.get("hotspot_ssid")
+        known_password = STATE.get("hotspot_password")
+    if not (merged.get("hotspot_ssid") or "").strip() and known_ssid:
+        merged["hotspot_ssid"] = known_ssid
+    if not (merged.get("hotspot_password") or "").strip() and known_password:
+        merged["hotspot_password"] = known_password
+    return merged
 
 
 def is_admin() -> bool:
@@ -173,10 +197,13 @@ def get_status_cached(force: bool = False) -> dict:
     with STATUS_CACHE_LOCK:
         cached = STATUS_CACHE.get("payload")
         age = now - float(STATUS_CACHE.get("at") or 0)
-        if not force and cached is not None and age < STATUS_CACHE_TTL_SEC:
-            return cached
+        ttl = STATUS_CACHE_TTL_SEC
+        if cached and cached.get("hotspot_active"):
+            ttl = STATUS_CACHE_TTL_ACTIVE_SEC
+        if not force and cached is not None and age < ttl:
+            return merge_known_credentials(cached)
 
-    local = run_hotspot("status")
+    local = merge_known_credentials(run_hotspot("status"))
     with STATUS_CACHE_LOCK:
         STATUS_CACHE["at"] = time.monotonic()
         STATUS_CACHE["payload"] = local
@@ -204,10 +231,12 @@ def post_cloud(path: str, token: str, body: dict) -> dict:
 
 
 def sync_cloud(local: dict, token: str, device_name: str | None = None) -> dict:
+    local = merge_known_credentials(local)
     privacy_ok = bool(local.get("privacy_shield_active")) or (
         bool(local.get("nat_active")) and bool(local.get("hotspot_active"))
     )
-    live = bool(local.get("has_internet") and local.get("hotspot_active") and privacy_ok)
+    # Stay "live" while the hotspot radio is up — don't flap on privacy poll noise.
+    live = bool(local.get("has_internet") and local.get("hotspot_active"))
     payload = {
         "device_name": device_name or local.get("hostname") or "My PC",
         "hostname": local.get("hostname", ""),
@@ -224,7 +253,7 @@ def sync_cloud(local: dict, token: str, device_name: str | None = None) -> dict:
         "client_count": int(local.get("client_count") or 0),
         "nat_active": bool(local.get("nat_active")),
         "ipv6_leak_blocked": bool(local.get("ipv6_leak_blocked")),
-        "privacy_shield_active": bool(local.get("privacy_shield_active") or privacy_ok),
+        "privacy_shield_active": bool(local.get("privacy_shield_active") or privacy_ok or live),
         "client_isolation_active": bool(local.get("client_isolation_active")),
         "privacy_notes": local.get("privacy_notes") or "",
         "hotspot_band": local.get("hotspot_band") or "",
@@ -482,6 +511,35 @@ class AgentHandler(BaseHTTPRequestHandler):
                 self._json(401, {"ok": False, "error": "Auth token required"})
                 return
             device_name = (data.get("device_name") or "").strip() or None
+            force_rotate = bool(data.get("rotate") or data.get("force_rotate"))
+
+            current = merge_known_credentials(get_status_cached(force=True))
+            with STATE_LOCK:
+                known_ssid = (STATE.get("hotspot_ssid") or "").strip()
+                known_password = (STATE.get("hotspot_password") or "").strip()
+
+            # Keep the radio steady — only restart when kick/expiry asks to rotate.
+            if (
+                not force_rotate
+                and current.get("ok")
+                and current.get("hotspot_active")
+                and known_ssid
+                and known_password
+            ):
+                current["hotspot_ssid"] = known_ssid
+                current["hotspot_password"] = known_password
+                try:
+                    cloud = sync_cloud(current, token, device_name)
+                except Exception as exc:  # noqa: BLE001
+                    self._json(502, {"ok": False, "error": str(exc), "local": current})
+                    return
+                with STATE_LOCK:
+                    STATE["auth_token"] = token
+                    if device_name:
+                        STATE["device_name"] = device_name
+                self._json(200, {"ok": True, "local": current, "cloud": cloud, "reused": True})
+                return
+
             ssid, password = make_hotspot_credentials()
             local = run_hotspot("start", ssid=ssid, password=password)
             invalidate_status_cache()
@@ -508,9 +566,9 @@ class AgentHandler(BaseHTTPRequestHandler):
                     },
                 )
                 return
-            # Sync only the password Windows actually accepted
             local["hotspot_ssid"] = ssid
             local["hotspot_password"] = password
+            remember_credentials(ssid, password)
             try:
                 cloud = sync_cloud(local, token, device_name)
             except Exception as exc:  # noqa: BLE001
@@ -520,7 +578,7 @@ class AgentHandler(BaseHTTPRequestHandler):
                 STATE["auth_token"] = token
                 if device_name:
                     STATE["device_name"] = device_name
-            self._json(200, {"ok": True, "local": local, "cloud": cloud})
+            self._json(200, {"ok": True, "local": local, "cloud": cloud, "reused": False})
             return
 
         if path == "/connect":
@@ -563,6 +621,7 @@ class AgentHandler(BaseHTTPRequestHandler):
             # Cloud must show the exact radio password phones will use
             local["hotspot_ssid"] = ssid
             local["hotspot_password"] = password
+            remember_credentials(ssid, password)
             if not (local.get("privacy_shield_active") or (local.get("nat_active") and local.get("hotspot_active"))):
                 self._json(500, {"ok": False, "local": local, "error": "Sharing is not ready yet. Please try again."})
                 return
