@@ -284,7 +284,8 @@ def respond_to_request(gateway_user, request_id, approve, session_minutes=None):
     request_obj.responded_at = now
     if approve:
         device = get_or_create_gateway_device(gateway_user)
-        if not device.hotspot_active or not device.is_connected:
+        # hotspot_active + credentials are enough; is_connected can lag after agent sync
+        if not device.hotspot_active:
             raise ValueError(
                 "Start sharing on this computer first, then approve your friend."
             )

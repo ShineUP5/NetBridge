@@ -146,9 +146,16 @@ export default function GatewayPage() {
     setError('')
     setSuccess('')
     try {
+      // Prefer credentials already on the dashboard — avoid blocking on slow helper sync.
       if (approve) {
-        const health = await agentApi.health()
-        if (health?.ok) {
+        const hasCreds = Boolean(status?.hotspot_ssid && status?.hotspot_password)
+        if (!hasCreds) {
+          const health = await agentApi.health()
+          if (!health?.ok) {
+            throw new Error(
+              'Start the NetBridge helper, tap Start sharing, then approve.',
+            )
+          }
           let synced = await agentApi.status(token)
           let cloud = synced?.cloud
           if (!cloud?.hotspot_password || !cloud?.hotspot_ssid) {
@@ -164,23 +171,24 @@ export default function GatewayPage() {
               'Shared WiFi is not ready. Tap Start sharing, wait for the WiFi name/password, then approve.',
             )
           }
-        } else if (!status?.hotspot_password || !status?.hotspot_ssid) {
-          throw new Error(
-            'Start the NetBridge helper on this computer, tap Start sharing, then approve.',
-          )
         }
       }
 
       const minutes = approve ? sessionMinutesPayload(sessionMinutes) : null
       const result = await gatewayApi.respond(token, requestId, approve, minutes)
-      await refresh()
+
+      // Don't freeze the Approve button waiting on a full helper refresh
+      refresh().catch(() => {})
+
       if (approve) {
         const name = result?.dependant?.full_name || result?.dependant?.phone || 'your friend'
         const ssid = result?.wifi?.ssid || status?.hotspot_ssid || 'your shared WiFi'
         const timeNote = result?.session_label ? ` Time: ${result.session_label}.` : ''
         setSuccess(`Approved ${name}. They should join WiFi “${ssid}”.${timeNote}`)
+        setPending((prev) => prev.filter((item) => String(item.id) !== String(requestId)))
       } else {
         setSuccess('Request denied.')
+        setPending((prev) => prev.filter((item) => String(item.id) !== String(requestId)))
       }
     } catch (err) {
       setSuccess('')
