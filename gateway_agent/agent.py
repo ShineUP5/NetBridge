@@ -303,8 +303,30 @@ class AgentHandler(BaseHTTPRequestHandler):
         clean = parse.urlparse(url_path).path
         if clean in {"", "/"}:
             clean = "/index.html"
-        # SPA routes
-        if clean in {"/join", "/dependant", "/login", "/signup", "/gateway"} or not Path(clean).suffix:
+
+        suffix = Path(clean).suffix.lower()
+        # Missing hashed assets must 404 as JS/CSS — never return index.html (breaks modules).
+        asset_exts = {
+            ".js",
+            ".mjs",
+            ".css",
+            ".map",
+            ".json",
+            ".svg",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".webp",
+            ".ico",
+            ".woff",
+            ".woff2",
+            ".ttf",
+            ".webmanifest",
+        }
+
+        if clean in {"/join", "/dependant", "/login", "/signup", "/gateway"} or (
+            not suffix and clean not in {"/index.html"}
+        ):
             candidate = WEB_DIST / "index.html"
         else:
             candidate = (WEB_DIST / clean.lstrip("/")).resolve()
@@ -314,6 +336,9 @@ class AgentHandler(BaseHTTPRequestHandler):
                 return False
 
         if not candidate.exists() or not candidate.is_file():
+            if suffix in asset_exts:
+                self._send_bytes(404, b"Not found", "text/plain; charset=utf-8")
+                return True
             candidate = WEB_DIST / "index.html"
             if not candidate.exists():
                 return False
@@ -322,6 +347,14 @@ class AgentHandler(BaseHTTPRequestHandler):
         content_type = mimetypes.guess_type(str(candidate))[0] or "application/octet-stream"
         if candidate.name == "index.html":
             content_type = "text/html; charset=utf-8"
+        elif suffix == ".js" or suffix == ".mjs":
+            content_type = "text/javascript; charset=utf-8"
+        elif suffix == ".css":
+            content_type = "text/css; charset=utf-8"
+        elif suffix == ".svg":
+            content_type = "image/svg+xml"
+        elif suffix == ".json" or suffix == ".webmanifest":
+            content_type = "application/json"
         self._send_bytes(200, data, content_type)
         return True
 

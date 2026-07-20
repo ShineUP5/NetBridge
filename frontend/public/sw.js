@@ -1,11 +1,7 @@
 /* NetBridge offline shell — keeps join/dependant pages available without internet */
-const CACHE = 'netbridge-v1'
+const CACHE = 'netbridge-v3'
 const PRECACHE = [
   '/',
-  '/join',
-  '/dependant',
-  '/login',
-  '/signup',
   '/index.html',
   '/manifest.webmanifest',
   '/favicon.svg',
@@ -28,6 +24,10 @@ self.addEventListener('activate', (event) => {
   self.clients.claim()
 })
 
+function isAssetRequest(pathname) {
+  return /\.(js|mjs|css|map|png|jpg|jpeg|svg|webp|ico|woff2?|ttf|webmanifest)$/i.test(pathname)
+}
+
 self.addEventListener('fetch', (event) => {
   const { request } = event
   if (request.method !== 'GET') return
@@ -35,24 +35,42 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url)
   if (url.origin !== self.location.origin) return
 
-  // Never cache API — always try network (via gateway helper when offline upstream)
-  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/health') || url.pathname.startsWith('/status') || url.pathname.startsWith('/connect')) {
+  // Never cache API / helper control — always network
+  if (
+    url.pathname.startsWith('/api/') ||
+    url.pathname.startsWith('/health') ||
+    url.pathname.startsWith('/status') ||
+    url.pathname.startsWith('/connect') ||
+    url.pathname.startsWith('/disconnect') ||
+    url.pathname.startsWith('/ensure-wifi')
+  ) {
     return
   }
 
-  event.respondWith(
-    caches.match(request).then((cached) => {
-      const networked = fetch(request)
-        .then((response) => {
-          if (response && response.ok && response.type === 'basic') {
-            const clone = response.clone()
-            caches.open(CACHE).then((cache) => cache.put(request, clone))
-          }
-          return response
-        })
-        .catch(() => cached || caches.match('/index.html'))
+  // JS/CSS assets: network only — never fall back to HTML (MIME module errors)
+  if (isAssetRequest(url.pathname)) {
+    event.respondWith(
+      fetch(request).then((response) => {
+        if (response && response.ok && response.type === 'basic') {
+          const clone = response.clone()
+          caches.open(CACHE).then((cache) => cache.put(request, clone))
+        }
+        return response
+      }),
+    )
+    return
+  }
 
-      return cached || networked
-    }),
+  // HTML / app routes: network first, cache fallback
+  event.respondWith(
+    fetch(request)
+      .then((response) => {
+        if (response && response.ok && response.type === 'basic') {
+          const clone = response.clone()
+          caches.open(CACHE).then((cache) => cache.put(request, clone))
+        }
+        return response
+      })
+      .catch(() => caches.match(request).then((cached) => cached || caches.match('/index.html'))),
   )
 })

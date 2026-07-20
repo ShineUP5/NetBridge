@@ -11,6 +11,12 @@ createRoot(document.getElementById('root')).render(
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {})
+    navigator.serviceWorker
+      .register('/sw.js')
+      .then((reg) => {
+        // Force update so old caches that poisoned JS with HTML are dropped
+        reg.update().catch(() => {})
+      })
+      .catch(() => {})
   })
 }
