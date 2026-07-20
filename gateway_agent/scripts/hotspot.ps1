@@ -283,6 +283,22 @@ function Ensure-ClientInternet([string]$uplinkAlias) {
       }
     }
 
+    # ICMP helps phones/desktops pass "connected with internet" checks
+    $icmpName = "NetBridge Allow Hotspot ICMP ($subnet)"
+    try {
+      $exists = Get-NetFirewallRule -DisplayName $icmpName -ErrorAction SilentlyContinue
+      if (-not $exists) {
+        New-NetFirewallRule `
+          -DisplayName $icmpName `
+          -Direction Inbound `
+          -Action Allow `
+          -Protocol ICMPv4 `
+          -RemoteAddress $subnet `
+          -Profile Any `
+          -ErrorAction SilentlyContinue | Out-Null
+      }
+    } catch { }
+
     # Allow join portal + helper API from phones on shared WiFi
     $portal = "NetBridge Allow Join Portal ($subnet)"
     try {
@@ -321,8 +337,7 @@ function Apply-HostIsolation {
 
   Get-NetFirewallRule -ErrorAction SilentlyContinue |
     Where-Object {
-      $_.DisplayName -like 'NetBridge Isolate*' -or
-      $_.DisplayName -like 'NetBridge Allow Hotspot*'
+      $_.DisplayName -like 'NetBridge Isolate*'
     } |
     Remove-NetFirewallRule -ErrorAction SilentlyContinue
 
@@ -411,6 +426,14 @@ function Apply-PrivacyShield([string]$uplinkAlias) {
     $notes.Add('Internet sharing service is running.')
   }
 
+  # Isolation first (file ports only), then open DNS/portal — never delete DNS allows after this.
+  $isolationActive = Apply-HostIsolation
+  if ($isolationActive) {
+    $notes.Add('Friends get internet only. PC files stay blocked.')
+  } else {
+    $notes.Add('Start the NetBridge helper with Administrator permission to protect your files.')
+  }
+
   $natHelp = Ensure-ClientInternet -uplinkAlias $uplinkAlias
   if ($natHelp.notes) { $notes.Add($natHelp.notes) }
 
@@ -420,31 +443,9 @@ function Apply-PrivacyShield([string]$uplinkAlias) {
       $ipv6Disabled = $true
     }
   }
+  # Do NOT disable IPv6 on the PC's uplink — that can break this PC's own internet.
 
-  if ($uplinkAlias -and (Disable-Ipv6OnAdapter $uplinkAlias)) {
-    $ipv6Disabled = $true
-  }
-
-  $isolationActive = Apply-HostIsolation
-  if ($isolationActive) {
-    $notes.Add('Friends get internet only. PC files stay blocked.')
-  } else {
-    $notes.Add('Start the NetBridge helper with Administrator permission to protect your files.')
-  }
-
-  $ruleName = 'NetBridge Block Outbound IPv6'
-  try {
-    $existing = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
-    if (-not $existing) {
-      New-NetFirewallRule -DisplayName $ruleName -Direction Outbound -Protocol ICMPv6 -Action Block -Profile Any -ErrorAction SilentlyContinue | Out-Null
-      New-NetFirewallRule -DisplayName "$ruleName TCP" -Direction Outbound -Protocol TCP -RemoteAddress ::/0 -Action Block -Profile Any -ErrorAction SilentlyContinue | Out-Null
-      New-NetFirewallRule -DisplayName "$ruleName UDP" -Direction Outbound -Protocol UDP -RemoteAddress ::/0 -Action Block -Profile Any -ErrorAction SilentlyContinue | Out-Null
-    }
-  } catch {
-    # optional
-  }
-
-  $natOk = $icsRunning -or ($shareAdapters.Count -gt 0) -or [bool]$natHelp.forwarding
+  $natOk = $icsRunning -or ($shareAdapters.Count -gt 0) -or [bool]$natHelp.forwarding -or [bool]$natHelp.dns
   $shieldActive = $natOk
 
   return @{
@@ -594,10 +595,8 @@ try {
         elseif ($bandRaw -match 'Five|^\s*2\s*$') { $coverage.band = '5 GHz' }
         elseif ($bandRaw -match 'Six|^\s*3\s*$') { $coverage.band = '6 GHz' }
       } catch { }
-      $privacy = Get-PrivacyStatusQuick -uplinkAlias $uplink.alias
-      if (-not $privacy.privacy_shield_active) {
-        $privacy = Apply-PrivacyShield -uplinkAlias $uplink.alias
-      }
+      # Always repair DNS/NAT so friends get internet even if sharing was already on.
+      $privacy = Apply-PrivacyShield -uplinkAlias $uplink.alias
     } else {
       if ($alreadyOn) {
         Stop-Tethering $tm

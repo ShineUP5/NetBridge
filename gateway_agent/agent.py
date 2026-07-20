@@ -518,7 +518,7 @@ class AgentHandler(BaseHTTPRequestHandler):
                 known_ssid = (STATE.get("hotspot_ssid") or "").strip()
                 known_password = (STATE.get("hotspot_password") or "").strip()
 
-            # Keep the radio steady — only restart when kick/expiry asks to rotate.
+            # Keep the same WiFi name/password, but still run start so DNS/NAT is repaired.
             if (
                 not force_rotate
                 and current.get("ok")
@@ -526,18 +526,30 @@ class AgentHandler(BaseHTTPRequestHandler):
                 and known_ssid
                 and known_password
             ):
-                current["hotspot_ssid"] = known_ssid
-                current["hotspot_password"] = known_password
+                local = run_hotspot("start", ssid=known_ssid, password=known_password)
+                invalidate_status_cache()
+                local = merge_known_credentials(local)
+                local["hotspot_ssid"] = known_ssid
+                local["hotspot_password"] = known_password
+                remember_credentials(known_ssid, known_password)
                 try:
-                    cloud = sync_cloud(current, token, device_name)
+                    cloud = sync_cloud(local, token, device_name)
                 except Exception as exc:  # noqa: BLE001
-                    self._json(502, {"ok": False, "error": str(exc), "local": current})
+                    self._json(502, {"ok": False, "error": str(exc), "local": local})
                     return
                 with STATE_LOCK:
                     STATE["auth_token"] = token
                     if device_name:
                         STATE["device_name"] = device_name
-                self._json(200, {"ok": True, "local": current, "cloud": cloud, "reused": True})
+                self._json(
+                    200,
+                    {
+                        "ok": True,
+                        "local": local,
+                        "cloud": cloud,
+                        "reused": True,
+                    },
+                )
                 return
 
             ssid, password = make_hotspot_credentials()
