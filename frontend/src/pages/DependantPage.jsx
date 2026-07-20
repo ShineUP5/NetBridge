@@ -28,7 +28,7 @@ export default function DependantPage() {
     }
   }, [token])
 
-  usePolling(refresh, 3000, Boolean(token && user?.role === 'dependant'))
+  usePolling(refresh, connection?.status === 'pending' ? 5000 : 10000, Boolean(token && user?.role === 'dependant'))
 
   async function handleConnect(code) {
     setLoading(true)

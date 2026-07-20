@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { agentApi } from '../api/agent'
 import { gatewayApi } from '../api/gateway'
@@ -27,6 +27,8 @@ export default function GatewayPage() {
   const [busy, setBusy] = useState('')
   const [busyRequestId, setBusyRequestId] = useState(null)
 
+  const pollTick = useRef(0)
+
   const rotateWifiPassword = useCallback(async () => {
     const health = await agentApi.health()
     if (!health?.ok) {
@@ -41,27 +43,31 @@ export default function GatewayPage() {
 
   const refresh = useCallback(async () => {
     if (!token) return
+    pollTick.current += 1
+    // Agent status is heavier — sync every other poll (same data path, less load)
+    const syncAgent = pollTick.current === 1 || pollTick.current % 2 === 0
     try {
-      // Prefer one status call; health only if status fails.
-      let healthOk = false
-      try {
-        const synced = await agentApi.status(token)
-        healthOk = true
-        setAgentOnline(true)
-        if (synced?.cloud) {
-          setStatus(synced.cloud)
-          if (Number(synced.cloud.sessions_expired || 0) > 0) {
-            try {
-              await agentApi.ensureWifi(token, synced.cloud.device_name)
-            } catch {
-              // Timed-out friends already lost credentials; password rotate is best-effort.
+      let healthOk = agentOnline
+      if (syncAgent) {
+        try {
+          const synced = await agentApi.status(token)
+          healthOk = true
+          setAgentOnline(true)
+          if (synced?.cloud) {
+            setStatus(synced.cloud)
+            if (Number(synced.cloud.sessions_expired || 0) > 0) {
+              try {
+                await agentApi.ensureWifi(token, synced.cloud.device_name)
+              } catch {
+                // Timed-out friends already lost credentials; password rotate is best-effort.
+              }
             }
           }
+        } catch {
+          const health = await agentApi.health()
+          healthOk = Boolean(health?.ok)
+          setAgentOnline(healthOk)
         }
-      } catch {
-        const health = await agentApi.health()
-        healthOk = Boolean(health?.ok)
-        setAgentOnline(healthOk)
       }
 
       const [deviceStatus, pendingRequests, connectedPayload] = await Promise.all([
@@ -85,9 +91,10 @@ export default function GatewayPage() {
     } catch (err) {
       setError(err.message)
     }
-  }, [token, rotateWifiPassword])
+  }, [token, rotateWifiPassword, agentOnline])
 
-  usePolling(refresh, 8000, Boolean(token && user?.role === 'gateway'))
+  const pollMs = pending.length ? 7000 : 14000
+  usePolling(refresh, pollMs, Boolean(token && user?.role === 'gateway'))
 
   async function handleConnect(deviceName) {
     setBusy('connect')

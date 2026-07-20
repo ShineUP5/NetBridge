@@ -34,7 +34,7 @@ STATE_LOCK = threading.Lock()
 HOTSPOT_LOCK = threading.Lock()
 STATUS_CACHE_LOCK = threading.Lock()
 STATUS_CACHE: dict = {"at": 0.0, "payload": None}
-STATUS_CACHE_TTL_SEC = 2.5
+STATUS_CACHE_TTL_SEC = 4.0
 STATE = {
     "auth_token": None,
     "device_name": None,

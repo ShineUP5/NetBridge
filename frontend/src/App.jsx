@@ -2,9 +2,9 @@ import { lazy, Suspense } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { PageLoader } from './components/PageLoader'
 import { AuthProvider } from './context/AuthContext'
+import HomePage from './pages/HomePage'
 import './App.css'
 
-const HomePage = lazy(() => import('./pages/HomePage'))
 const SignupPage = lazy(() => import('./pages/SignupPage'))
 const LoginPage = lazy(() => import('./pages/LoginPage'))
 const GatewayPage = lazy(() => import('./pages/GatewayPage'))

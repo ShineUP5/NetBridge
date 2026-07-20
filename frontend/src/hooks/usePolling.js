@@ -12,9 +12,11 @@ export function usePolling(callback, intervalMs, enabled = true) {
     if (!enabled) return undefined
 
     let cancelled = false
+    let id = null
 
     async function tick() {
       if (cancelled || inFlight.current) return
+      if (typeof document !== 'undefined' && document.hidden) return
       inFlight.current = true
       try {
         await saved.current()
@@ -23,11 +25,22 @@ export function usePolling(callback, intervalMs, enabled = true) {
       }
     }
 
-    tick()
-    const id = setInterval(tick, intervalMs)
+    function start() {
+      if (id) clearInterval(id)
+      tick()
+      id = setInterval(tick, intervalMs)
+    }
+
+    function onVisibility() {
+      if (!document.hidden) tick()
+    }
+
+    start()
+    document.addEventListener('visibilitychange', onVisibility)
     return () => {
       cancelled = true
       clearInterval(id)
+      document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [intervalMs, enabled])
 }
