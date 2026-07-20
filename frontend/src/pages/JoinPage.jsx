@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, Navigate } from 'react-router-dom'
+import { wakeApi } from '../api/client'
 import { Brand } from '../components/Brand'
 import { Button } from '../components/Button'
 import { FormField } from '../components/FormField'
@@ -19,6 +20,10 @@ export default function JoinPage() {
     phone: '',
     password: '',
   })
+
+  useEffect(() => {
+    wakeApi()
+  }, [])
 
   if (booting) {
     return (

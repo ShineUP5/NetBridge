@@ -1,5 +1,6 @@
 import { Link, Navigate, useNavigate } from 'react-router-dom'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { wakeApi } from '../api/client'
 import { Brand } from '../components/Brand'
 import { Button } from '../components/Button'
 import { FormField } from '../components/FormField'
@@ -21,6 +22,24 @@ export default function SignupPage() {
   const [form, setForm] = useState(INITIAL)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [waitHint, setWaitHint] = useState('')
+
+  useEffect(() => {
+    wakeApi()
+  }, [])
+
+  useEffect(() => {
+    if (!loading) {
+      setWaitHint('')
+      return undefined
+    }
+    const t1 = setTimeout(() => setWaitHint('Waking the server… usually under 25 seconds.'), 4000)
+    const t2 = setTimeout(() => setWaitHint('Still waiting… will stop at 25s so you can retry.'), 12000)
+    return () => {
+      clearTimeout(t1)
+      clearTimeout(t2)
+    }
+  }, [loading])
 
   if (user) return <Navigate to={roleHome(user.role)} replace />
 
@@ -83,9 +102,10 @@ export default function SignupPage() {
           onChange={setField('password')}
         />
 
+        {waitHint && loading ? <p className="info banner">{waitHint}</p> : null}
         {error ? <p className="error">{error}</p> : null}
         <Button type="submit" disabled={loading}>
-          {loading ? 'Creating…' : 'Create account'}
+          {loading ? 'Creating…' : error ? 'Try again' : 'Create account'}
         </Button>
         <p className="muted">
           Already have an account? <Link to="/login">Log in</Link>

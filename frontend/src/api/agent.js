@@ -11,6 +11,7 @@ async function agentRequest(path, { method = 'GET', body, token } = {}) {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(30000),
     })
   } catch {
     throw new Error('Please start the NetBridge helper on this computer, then try again.')

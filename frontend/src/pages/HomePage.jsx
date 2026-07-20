@@ -1,4 +1,6 @@
 import { Link, Navigate } from 'react-router-dom'
+import { useEffect } from 'react'
+import { wakeApi } from '../api/client'
 import { Brand } from '../components/Brand'
 import { ButtonLink } from '../components/ButtonLink'
 import { Logo } from '../components/Logo'
@@ -7,6 +9,10 @@ import { roleHome, useAuth } from '../context/AuthContext'
 
 export default function HomePage() {
   const { user, booting } = useAuth()
+
+  useEffect(() => {
+    wakeApi()
+  }, [])
   if (booting) return <PageLoader />
   if (user) return <Navigate to={roleHome(user.role)} replace />
 
