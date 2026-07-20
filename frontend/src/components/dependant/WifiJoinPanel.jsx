@@ -77,10 +77,10 @@ export function WifiJoinPanel({ wifi }) {
       </p>
 
       <ol className="wifi-steps">
-        <li>Open WiFi settings on this phone</li>
-        <li>Connect to the network name below</li>
+        <li>Turn off mobile data on this phone (so it must use WiFi)</li>
+        <li>Open WiFi settings and join the network below</li>
         <li>Enter the password below</li>
-        <li>Come back here and tap Test internet</li>
+        <li>Wait 10–15 seconds, then tap Test internet</li>
       </ol>
 
       <div className="wifi-cred">

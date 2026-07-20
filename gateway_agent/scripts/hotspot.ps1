@@ -181,7 +181,90 @@ function Disable-HostSharingOnAdapter([string]$alias) {
   }
 }
 
+function Ensure-ClientInternet([string]$uplinkAlias) {
+  # Make sure friends on the hotspot can actually use this PC's internet (NAT + DNS).
+  $notes = New-Object System.Collections.Generic.List[string]
+  $forwardOk = $false
+  $dnsOk = $false
+
+  try {
+    Get-NetIPInterface -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+      Where-Object { $_.ConnectionState -eq 'Connected' -or $_.InterfaceOperationalStatus -eq 1 } |
+      ForEach-Object {
+        try {
+          Set-NetIPInterface -InterfaceIndex $_.InterfaceIndex -Forwarding Enabled -ErrorAction Stop
+          $forwardOk = $true
+        } catch { }
+      }
+  } catch { }
+
+  if ($uplinkAlias) {
+    try {
+      Set-NetIPInterface -InterfaceAlias $uplinkAlias -AddressFamily IPv4 -Forwarding Enabled -ErrorAction SilentlyContinue
+      $forwardOk = $true
+    } catch { }
+  }
+
+  foreach ($adapter in @(Get-ShareAdapters)) {
+    try {
+      Set-NetIPInterface -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -Forwarding Enabled -ErrorAction SilentlyContinue
+      $forwardOk = $true
+    } catch { }
+  }
+
+  # DNS for hotspot clients (phones often use UDP/53 to the gateway)
+  foreach ($subnet in @(Get-HotspotSubnets)) {
+    foreach ($proto in @('UDP', 'TCP')) {
+      $name = "NetBridge Allow Hotspot DNS $proto ($subnet)"
+      try {
+        $exists = Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue
+        if (-not $exists) {
+          New-NetFirewallRule `
+            -DisplayName $name `
+            -Direction Inbound `
+            -Action Allow `
+            -Protocol $proto `
+            -LocalPort 53 `
+            -RemoteAddress $subnet `
+            -Profile Any `
+            -ErrorAction Stop | Out-Null
+        }
+        $dnsOk = $true
+      } catch {
+        netsh advfirewall firewall add rule name="$name" dir=in action=allow protocol=$proto localport=53 remoteip=$subnet | Out-Null
+        if ($LASTEXITCODE -eq 0) { $dnsOk = $true }
+      }
+    }
+
+    # Allow join portal + helper API from phones on shared WiFi
+    $portal = "NetBridge Allow Join Portal ($subnet)"
+    try {
+      $exists = Get-NetFirewallRule -DisplayName $portal -ErrorAction SilentlyContinue
+      if (-not $exists) {
+        New-NetFirewallRule `
+          -DisplayName $portal `
+          -Direction Inbound `
+          -Action Allow `
+          -Protocol TCP `
+          -LocalPort 8765 `
+          -RemoteAddress $subnet `
+          -Profile Any `
+          -ErrorAction SilentlyContinue | Out-Null
+      }
+    } catch { }
+  }
+
+  if ($forwardOk) { $notes.Add('IP forwarding enabled for shared internet.') }
+  if ($dnsOk) { $notes.Add('DNS open for hotspot clients.') }
+  return @{
+    forwarding = $forwardOk
+    dns = $dnsOk
+    notes = ($notes -join ' ')
+  }
+}
+
 function Apply-HostIsolation {
+  # Block only file/discovery ports — do NOT block all TCP (that breaks internet + join page).
   $applied = $false
   $subnets = @(Get-HotspotSubnets)
 
@@ -190,36 +273,29 @@ function Apply-HostIsolation {
   }
 
   Get-NetFirewallRule -ErrorAction SilentlyContinue |
-    Where-Object { $_.DisplayName -like 'NetBridge Isolate*' -or $_.DisplayName -like 'NetBridge Allow Hotspot*' } |
+    Where-Object {
+      $_.DisplayName -like 'NetBridge Isolate*' -or
+      $_.DisplayName -like 'NetBridge Allow Hotspot*'
+    } |
     Remove-NetFirewallRule -ErrorAction SilentlyContinue
 
   foreach ($subnet in $subnets) {
-    $tcpName = "NetBridge Isolate Host TCP ($subnet)"
-    $dnsName = "NetBridge Allow Hotspot DNS TCP ($subnet)"
-    $udpName = "NetBridge Isolate Host UDP discovery ($subnet)"
+    $fileTcp = "NetBridge Isolate Files TCP ($subnet)"
+    $fileUdp = "NetBridge Isolate Discovery UDP ($subnet)"
 
     try {
       New-NetFirewallRule `
-        -DisplayName $tcpName `
+        -DisplayName $fileTcp `
         -Direction Inbound `
         -Action Block `
         -Protocol TCP `
+        -LocalPort 135,139,445,3389,5357,5985,5986 `
         -RemoteAddress $subnet `
         -Profile Any `
         -ErrorAction Stop | Out-Null
 
       New-NetFirewallRule `
-        -DisplayName $dnsName `
-        -Direction Inbound `
-        -Action Allow `
-        -Protocol TCP `
-        -LocalPort 53 `
-        -RemoteAddress $subnet `
-        -Profile Any `
-        -ErrorAction SilentlyContinue | Out-Null
-
-      New-NetFirewallRule `
-        -DisplayName $udpName `
+        -DisplayName $fileUdp `
         -Direction Inbound `
         -Action Block `
         -Protocol UDP `
@@ -234,10 +310,9 @@ function Apply-HostIsolation {
       # Fall back to netsh (still needs Administrator).
     }
 
-    $netshTcp = netsh advfirewall firewall add rule name="$tcpName" dir=in action=block protocol=TCP remoteip=$subnet 2>&1
+    netsh advfirewall firewall add rule name="$fileTcp" dir=in action=block protocol=TCP localport=135,139,445,3389 remoteip=$subnet | Out-Null
     if ($LASTEXITCODE -eq 0) {
-      netsh advfirewall firewall add rule name="$dnsName" dir=in action=allow protocol=TCP localport=53 remoteip=$subnet | Out-Null
-      netsh advfirewall firewall add rule name="$udpName" dir=in action=block protocol=UDP localport=137,138,139,445,1900,2869,3702,5353,5355,5357 remoteip=$subnet | Out-Null
+      netsh advfirewall firewall add rule name="$fileUdp" dir=in action=block protocol=UDP localport=137,138,139,445,1900,2869,3702,5353,5355,5357 remoteip=$subnet | Out-Null
       $applied = $true
     }
   }
@@ -286,8 +361,11 @@ function Apply-PrivacyShield([string]$uplinkAlias) {
   $ipv6Disabled = $false
   $icsRunning = Ensure-IcsService
   if ($icsRunning) {
-    $notes.Add('Internet sharing is on.')
+    $notes.Add('Internet sharing service is running.')
   }
+
+  $natHelp = Ensure-ClientInternet -uplinkAlias $uplinkAlias
+  if ($natHelp.notes) { $notes.Add($natHelp.notes) }
 
   $shareAdapters = @(Get-ShareAdapters)
   foreach ($adapter in $shareAdapters) {
@@ -301,8 +379,8 @@ function Apply-PrivacyShield([string]$uplinkAlias) {
   }
 
   $isolationActive = Apply-HostIsolation
-    if ($isolationActive) {
-    $notes.Add('Friends only get internet. They cannot open files on this computer.')
+  if ($isolationActive) {
+    $notes.Add('Friends get internet only. PC files stay blocked.')
   } else {
     $notes.Add('Start the NetBridge helper with Administrator permission to protect your files.')
   }
@@ -319,7 +397,7 @@ function Apply-PrivacyShield([string]$uplinkAlias) {
     # optional
   }
 
-  $natOk = $icsRunning -or ($shareAdapters.Count -gt 0)
+  $natOk = $icsRunning -or ($shareAdapters.Count -gt 0) -or [bool]$natHelp.forwarding
   $shieldActive = $natOk
 
   return @{
