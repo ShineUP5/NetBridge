@@ -1,6 +1,7 @@
 const HELPER_PROTOCOL = 'netbridge://start'
 const HELPER_SETUP_URL = '/helper/Setup-NetBridge-Helper.bat'
 const HELPER_FLAG = 'netbridge_helper_installed'
+const AUTO_TRIED = 'netbridge_helper_auto_tried_session'
 
 export function helperWasInstalled() {
   try {
@@ -18,9 +19,19 @@ export function markHelperInstalled() {
   }
 }
 
-/** Ask Windows to open the installed helper (shows UAC). */
+/** Ask Windows to open the installed helper (no folder browsing). */
 export function launchHelperProtocol() {
-  window.location.href = HELPER_PROTOCOL
+  const iframe = document.createElement('iframe')
+  iframe.style.display = 'none'
+  iframe.src = HELPER_PROTOCOL
+  document.body.appendChild(iframe)
+  window.setTimeout(() => {
+    try {
+      iframe.remove()
+    } catch {
+      // ignore
+    }
+  }, 2000)
 }
 
 export function downloadHelperSetup() {
@@ -33,7 +44,7 @@ export function downloadHelperSetup() {
 }
 
 /** Poll until helper is up, or timeout. */
-export async function waitForHelper(checkHealth, { timeoutMs = 25000, intervalMs = 1500 } = {}) {
+export async function waitForHelper(checkHealth, { timeoutMs = 35000, intervalMs = 1200 } = {}) {
   const started = Date.now()
   while (Date.now() - started < timeoutMs) {
     const health = await checkHealth()
@@ -44,4 +55,14 @@ export async function waitForHelper(checkHealth, { timeoutMs = 25000, intervalMs
     await new Promise((r) => setTimeout(r, intervalMs))
   }
   return false
+}
+
+export function shouldAutoStartHelper() {
+  try {
+    if (sessionStorage.getItem(AUTO_TRIED) === '1') return false
+    sessionStorage.setItem(AUTO_TRIED, '1')
+    return true
+  } catch {
+    return true
+  }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button } from '../Button'
 import { StatusBadge } from '../StatusBadge'
 import {
@@ -6,6 +6,7 @@ import {
   helperWasInstalled,
   launchHelperProtocol,
   markHelperInstalled,
+  shouldAutoStartHelper,
   waitForHelper,
 } from '../../utils/helperLaunch'
 import { agentApi } from '../../api/agent'
@@ -21,6 +22,7 @@ export function GatewayConnectCard({
   const [deviceName, setDeviceName] = useState(status?.device_name || 'My PC')
   const [helperBusy, setHelperBusy] = useState(false)
   const [helperMsg, setHelperMsg] = useState('')
+  const autoStarted = useRef(false)
 
   useEffect(() => {
     if (status?.device_name) setDeviceName(status.device_name)
@@ -32,26 +34,55 @@ export function GatewayConnectCard({
 
   const live = Boolean(status?.is_live || (status?.is_connected && status?.hotspot_active))
 
-  async function handleStartHelper() {
+  async function startHelperFlow({ quiet = false } = {}) {
     setHelperBusy(true)
-    setHelperMsg('Opening helper… click Yes if Windows asks for permission.')
+    if (!quiet) {
+      setHelperMsg('Starting helper on this PC…')
+    }
     launchHelperProtocol()
-    const ok = await waitForHelper(() => agentApi.health(), { timeoutMs: 28000 })
+    const ok = await waitForHelper(() => agentApi.health(), { timeoutMs: 35000 })
     if (ok) {
       setHelperMsg('Helper is running. You can start sharing now.')
       onHelperReady?.()
-    } else {
+    } else if (!quiet) {
       setHelperMsg(
-        'Helper did not start yet. Tap “Install helper once”, run that file, then tap Start helper again.',
+        'Helper is not running yet. Tap “Install helper once” (one time only), then reload this page.',
       )
+    } else {
+      setHelperMsg('Waiting for helper… If this stays off, tap Start helper or Install helper once.')
     }
     setHelperBusy(false)
+    return ok
   }
+
+  // Auto-start helper when the SERVER page opens (after one-time install).
+  useEffect(() => {
+    if (live || agentOnline || autoStarted.current) return undefined
+    if (!shouldAutoStartHelper()) return undefined
+    autoStarted.current = true
+    let cancelled = false
+    ;(async () => {
+      // Quick check first
+      const health = await agentApi.health()
+      if (cancelled) return
+      if (health?.ok) {
+        markHelperInstalled()
+        onHelperReady?.()
+        return
+      }
+      setHelperMsg('Starting helper automatically…')
+      await startHelperFlow({ quiet: true })
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live, agentOnline])
 
   function handleInstallOnce() {
     downloadHelperSetup()
     setHelperMsg(
-      'Download started. Run Setup-NetBridge-Helper.bat once (click Yes), then come back and tap Start helper.',
+      'Download started. Run Setup-NetBridge-Helper.bat once and click Yes. After that the helper starts by itself when you use NetBridge.',
     )
   }
 
@@ -115,19 +146,25 @@ export function GatewayConnectCard({
       {!agentOnline ? (
         <div className="helper-launch">
           <p className="info banner">
-            The helper must run on this PC (one black window). Tap the button below — no need to dig through folders each time.
+            {helperBusy
+              ? 'Starting the helper automatically on this PC…'
+              : 'Helper is off. NetBridge will try to start it for you — install once if this is the first time on this computer.'}
           </p>
           <div className="helper-actions">
-            <Button type="button" disabled={helperBusy || loading} onClick={handleStartHelper}>
-              {helperBusy ? 'Starting helper…' : 'Start helper'}
+            <Button
+              type="button"
+              disabled={helperBusy || loading}
+              onClick={() => startHelperFlow({ quiet: false })}
+            >
+              {helperBusy ? 'Starting…' : 'Start helper'}
             </Button>
             <Button type="button" variant="ghost" disabled={helperBusy} onClick={handleInstallOnce}>
-              {helperWasInstalled() ? 'Reinstall helper' : 'Install helper once'}
+              {helperWasInstalled() ? 'Reinstall auto-start' : 'Install helper once'}
             </Button>
           </div>
           {helperMsg ? <p className="muted helper-msg">{helperMsg}</p> : null}
           <p className="muted">
-            First time only: Install helper once → click Yes → then Start helper whenever you share.
+            After one install, the helper starts when you sign into Windows and when you open this page.
           </p>
         </div>
       ) : (

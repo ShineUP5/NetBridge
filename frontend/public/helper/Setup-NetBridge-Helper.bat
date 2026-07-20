@@ -1,6 +1,5 @@
 @echo off
-REM Downloaded from the NetBridge website — first-time setup helper.
-REM Saves instructions and opens the install path if NetBridge is already on this PC.
+REM Downloaded from the NetBridge website — finds NetBridge and installs auto-start (once).
 
 setlocal
 set "FOUND="
@@ -19,26 +18,26 @@ if exist "%USERPROFILE%\Desktop\NetBridge\gateway_agent\Install NetBridge Helper
 )
 
 echo.
-echo  NetBridge helper setup
-echo  ----------------------
+echo  NetBridge helper — one-time auto-start setup
+echo  ---------------------------------------------
 echo.
 
 if defined FOUND (
-  echo  Found NetBridge on this PC.
-  echo  Starting one-time install...
+  echo  Found NetBridge. Installing auto-start...
+  echo  Click Yes when Windows asks. After this, the helper starts by itself.
   echo.
   call "%FOUND%"
   exit /b %ERRORLEVEL%
 )
 
-echo  NetBridge is not installed on this PC yet.
+echo  Could not find NetBridge on this PC automatically.
 echo.
 echo  Do this once:
-echo   1. Download / clone NetBridge onto this computer
-echo   2. Open the folder: gateway_agent
-echo   3. Double-click:  Install NetBridge Helper.bat
-echo   4. Click Yes when Windows asks
+echo   1. Open your NetBridge folder
+echo   2. Open: gateway_agent
+echo   3. Double-click: Install NetBridge Helper.bat
+echo   4. Click Yes
 echo.
-echo  After that, the website "Start helper" button will work.
+echo  After that, the helper starts when you sign in — no more folder digging.
 echo.
 pause
