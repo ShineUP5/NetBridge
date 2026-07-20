@@ -125,6 +125,8 @@ export function GatewayConnectCard({
         </ul>
         <p className="muted">
           Approved friends receive this WiFi name and password to get real internet.
+          If a phone says “Connected without internet”, on that phone open the NetBridge
+          WiFi settings → Advanced → set DNS to 8.8.8.8 and 8.8.4.4, then retry.
         </p>
         <Button variant="ghost" disabled={loading} onClick={onDisconnect}>
           {loading ? 'Stopping…' : 'Stop sharing'}

@@ -80,6 +80,10 @@ export function WifiJoinPanel({ wifi }) {
         <li>Turn off mobile data on this phone (so it must use WiFi)</li>
         <li>Open WiFi settings and join the network below</li>
         <li>Enter the password below</li>
+        <li>
+          If it says “without internet”: tap the gear → Advanced → DNS → set Manual to
+          8.8.8.8 and 8.8.4.4
+        </li>
         <li>Wait 10–15 seconds, then tap Test internet</li>
       </ol>
 

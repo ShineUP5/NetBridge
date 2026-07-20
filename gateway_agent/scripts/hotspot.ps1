@@ -148,13 +148,50 @@ function Get-UplinkInfo {
 
 function Get-ShareAdapters {
   # Mobile Hotspot / ICS virtual adapters used for clients (never the voucher uplink).
-  Get-NetAdapter -ErrorAction SilentlyContinue |
+  $byName = @(Get-NetAdapter -ErrorAction SilentlyContinue |
     Where-Object {
       $_.Status -eq 'Up' -and (
-        $_.InterfaceDescription -match 'Wi-Fi Direct Virtual|Microsoft Hosted Network|Virtual Adapter' -or
-        $_.Name -match 'Local Area Connection\*'
+        $_.InterfaceDescription -match 'Wi-Fi Direct Virtual|Microsoft Hosted Network|Virtual Adapter|Mobile Hotspot' -or
+        $_.Name -match 'Local Area Connection\*|Microsoft Wi-Fi Direct'
       )
+    })
+
+  # Also catch any live adapter that owns the hotspot LAN IP.
+  $byIp = @()
+  try {
+    $addrs = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+      Where-Object { $_.IPAddress -like '192.168.137.*' -or $_.IPAddress -like '192.168.2.*' }
+    foreach ($addr in @($addrs)) {
+      $nic = Get-NetAdapter -InterfaceIndex $addr.InterfaceIndex -ErrorAction SilentlyContinue
+      if ($nic -and $nic.Status -eq 'Up') {
+        $byIp += $nic
+      }
     }
+  } catch { }
+
+  @($byName + $byIp) | Sort-Object -Property ifIndex -Unique
+}
+
+function Enable-IcsFirewallGroup {
+  try {
+    Get-NetFirewallRule -ErrorAction SilentlyContinue |
+      Where-Object {
+        $_.DisplayGroup -eq 'Internet Connection Sharing (ICS)' -or
+        $_.DisplayName -like '*Internet Connection Sharing*' -or
+        $_.DisplayName -like '*Mobile Hotspot*'
+      } |
+      Enable-NetFirewallRule -ErrorAction SilentlyContinue
+  } catch { }
+}
+
+function Set-IpForwardingRegistry {
+  try {
+    $path = 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters'
+    Set-ItemProperty -Path $path -Name 'IPEnableRouter' -Value 1 -Type DWord -Force -ErrorAction Stop
+    return $true
+  } catch {
+    return $false
+  }
 }
 
 function Ensure-IcsService {
@@ -234,9 +271,13 @@ function Ensure-ClientInternet([string]$uplinkAlias) {
   $forwardOk = $false
   $dnsOk = $false
 
+  Enable-IcsFirewallGroup
+  if (Set-IpForwardingRegistry) {
+    $notes.Add('IP routing enabled in Windows.')
+  }
+
   try {
     Get-NetIPInterface -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-      Where-Object { $_.ConnectionState -eq 'Connected' -or $_.InterfaceOperationalStatus -eq 1 } |
       ForEach-Object {
         try {
           Set-NetIPInterface -InterfaceIndex $_.InterfaceIndex -Forwarding Enabled -ErrorAction Stop
@@ -275,6 +316,8 @@ function Ensure-ClientInternet([string]$uplinkAlias) {
             -RemoteAddress $subnet `
             -Profile Any `
             -ErrorAction Stop | Out-Null
+        } else {
+          Enable-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue
         }
         $dnsOk = $true
       } catch {
@@ -296,6 +339,8 @@ function Ensure-ClientInternet([string]$uplinkAlias) {
           -RemoteAddress $subnet `
           -Profile Any `
           -ErrorAction SilentlyContinue | Out-Null
+      } else {
+        Enable-NetFirewallRule -DisplayName $icmpName -ErrorAction SilentlyContinue
       }
     } catch { }
 
@@ -313,6 +358,8 @@ function Ensure-ClientInternet([string]$uplinkAlias) {
           -RemoteAddress $subnet `
           -Profile Any `
           -ErrorAction SilentlyContinue | Out-Null
+      } else {
+        Enable-NetFirewallRule -DisplayName $portal -ErrorAction SilentlyContinue
       }
     } catch { }
   }
