@@ -6,25 +6,98 @@ function withTimeout(ms) {
   return { signal: controller.signal, clear: () => clearTimeout(timer) }
 }
 
+/** Chrome Local Network Access: public site → localhost/private helper. */
+function agentTargetAddressSpace() {
+  try {
+    const host = new URL(getAgentBase()).hostname
+    if (host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1') {
+      return 'loopback'
+    }
+    return 'local'
+  } catch {
+    return 'loopback'
+  }
+}
+
+function agentFetchInit(extra = {}) {
+  return {
+    ...extra,
+    // Annotate destination so Chrome allows HTTPS page → http://127.0.0.1 helper.
+    targetAddressSpace: agentTargetAddressSpace(),
+  }
+}
+
+let localAccessProbe = null
+
+/**
+ * Ask Chrome for permission to talk to the local NetBridge helper.
+ * Must run from a secure context (https://net-bridge-pied.vercel.app).
+ */
+export async function ensureLocalAgentAccess() {
+  if (typeof window === 'undefined') return true
+
+  try {
+    for (const name of ['loopback-network', 'local-network', 'local-network-access']) {
+      try {
+        const status = await navigator.permissions.query({ name })
+        if (status.state === 'granted') return true
+        if (status.state === 'denied') {
+          return false
+        }
+      } catch {
+        // Permission name not supported in this browser — continue.
+      }
+    }
+  } catch {
+    // Permissions API unavailable.
+  }
+
+  if (!localAccessProbe) {
+    localAccessProbe = (async () => {
+      const { signal, clear } = withTimeout(4000)
+      try {
+        await fetch(
+          `${getAgentBase()}/health`,
+          agentFetchInit({ method: 'GET', cache: 'no-store', signal }),
+        )
+        return true
+      } catch {
+        return false
+      } finally {
+        clear()
+        localAccessProbe = null
+      }
+    })()
+  }
+  return localAccessProbe
+}
+
 async function agentRequest(path, { method = 'GET', body, token, timeoutMs = 12000 } = {}) {
   const AGENT_URL = getAgentBase()
   const headers = { 'Content-Type': 'application/json' }
   if (token) headers.Authorization = `Bearer ${token}`
 
+  await ensureLocalAgentAccess()
+
   const { signal, clear } = withTimeout(timeoutMs)
   let response
   try {
-    response = await fetch(`${AGENT_URL}${path}`, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-      signal,
-    })
+    response = await fetch(
+      `${AGENT_URL}${path}`,
+      agentFetchInit({
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+        signal,
+      }),
+    )
   } catch (err) {
     if (err?.name === 'AbortError') {
       throw new Error('Helper took too long. Keep the helper window open, then try again.')
     }
-    throw new Error('Please start the NetBridge helper on this computer, then try again.')
+    throw new Error(
+      'Please allow local network access for NetBridge in the browser prompt, keep the helper open, then try again.',
+    )
   } finally {
     clear()
   }
@@ -72,9 +145,13 @@ function friendlyAgentError(message) {
 
 export const agentApi = {
   health: async () => {
+    await ensureLocalAgentAccess()
     const { signal, clear } = withTimeout(2500)
     try {
-      const response = await fetch(`${getAgentBase()}/health`, { signal })
+      const response = await fetch(
+        `${getAgentBase()}/health`,
+        agentFetchInit({ signal, cache: 'no-store' }),
+      )
       if (!response.ok) return { ok: false }
       return response.json()
     } catch {

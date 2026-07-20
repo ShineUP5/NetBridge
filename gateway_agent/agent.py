@@ -300,11 +300,17 @@ class AgentHandler(BaseHTTPRequestHandler):
     server_version = "NetBridgeGatewayAgent/1.0"
 
     def _cors(self):
-        origin = self.headers.get("Origin", "*")
+        origin = self.headers.get("Origin", "*") or "*"
         self.send_header("Access-Control-Allow-Origin", origin)
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_header(
+            "Access-Control-Allow-Headers",
+            "Content-Type, Authorization, Access-Control-Request-Private-Network",
+        )
         self.send_header("Access-Control-Allow-Credentials", "true")
+        # Chrome Local Network Access / Private Network Access (Vercel → 127.0.0.1 helper)
+        self.send_header("Access-Control-Allow-Private-Network", "true")
+        self.send_header("Vary", "Origin, Access-Control-Request-Private-Network")
 
     def _client_gone(self, exc: BaseException) -> bool:
         return isinstance(

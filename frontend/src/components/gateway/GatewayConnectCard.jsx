@@ -167,10 +167,14 @@ export function GatewayConnectCard({
           {helperMsg ? <p className="muted helper-msg">{helperMsg}</p> : null}
           <p className="muted">
             After one install, the helper starts when you sign into Windows and when you open this page.
+            If Chrome asks to allow local network / localhost access for NetBridge, choose Allow.
           </p>
         </div>
       ) : (
-        <p className="muted">Helper is ready. Friends will only get internet, not your files.</p>
+        <p className="muted">
+          Helper is ready. Friends will only get internet, not your files.
+          If Start sharing fails, allow local network access for this site in Chrome site settings.
+        </p>
       )}
 
       <label>
