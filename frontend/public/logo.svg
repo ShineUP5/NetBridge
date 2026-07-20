@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-label="NetBridge">
+  <!-- Clean mark: WiFi arcs + solid hub -->
+  <path d="M10 26.5c12.2-12 31.8-12 44 0" stroke="#2FBF71" stroke-width="5" stroke-linecap="round"/>
+  <path d="M18.5 35c7.5-7.4 19.5-7.4 27 0" stroke="#2FBF71" stroke-width="5" stroke-linecap="round"/>
+  <path d="M27 43.5c2.8-2.7 7.2-2.7 10 0" stroke="#E8F56B" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="32" cy="52" r="5" fill="#E8F56B"/>
+</svg>
