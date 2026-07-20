@@ -114,10 +114,27 @@ CORS_ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.getenv(
         "CORS_ALLOWED_ORIGINS",
-        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174",
+        ",".join(
+            [
+                "http://localhost:5173",
+                "http://127.0.0.1:5173",
+                "http://localhost:5174",
+                "http://127.0.0.1:5174",
+                "http://127.0.0.1:8765",
+                "http://192.168.137.1:8765",
+                "https://net-bridge-pied.vercel.app",
+            ]
+        ),
     ).split(",")
     if origin.strip()
 ]
+
+# Allow Vercel preview deployments (*.vercel.app)
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://[\w-]+\.vercel\.app$",
+]
+
+CORS_ALLOW_CREDENTIALS = True
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
