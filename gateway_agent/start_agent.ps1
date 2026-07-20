@@ -92,6 +92,12 @@ try {
   Write-Host 'NetBridge helper starting with Administrator protection...'
   Write-Host "Keep this window open. Gateway page: http://127.0.0.1:$agentPort"
   Write-Host ''
+
+  # Must match the website login API (Vercel → Render), not local Django.
+  if (-not $env:NETBRIDGE_API_URL) {
+    $env:NETBRIDGE_API_URL = 'https://netbridge-d5l8.onrender.com/api'
+  }
+
   & $python $agent
   $code = $LASTEXITCODE
   if ($null -eq $code) { $code = 0 }

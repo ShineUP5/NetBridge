@@ -25,7 +25,12 @@ from urllib.error import HTTPError, URLError
 
 AGENT_HOST = os.environ.get("NETBRIDGE_AGENT_HOST", "0.0.0.0")
 AGENT_PORT = int(os.environ.get("NETBRIDGE_AGENT_PORT", "8765"))
-API_BASE = os.environ.get("NETBRIDGE_API_URL", "http://127.0.0.1:8000/api")
+# Default to the hosted API so Start sharing works with the Vercel website.
+# For local Django only: set NETBRIDGE_API_URL=http://127.0.0.1:8000/api
+API_BASE = os.environ.get(
+    "NETBRIDGE_API_URL",
+    "https://netbridge-d5l8.onrender.com/api",
+).rstrip("/")
 ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = ROOT.parent
 SCRIPT = ROOT / "scripts" / "hotspot.ps1"
@@ -53,6 +58,21 @@ def make_hotspot_credentials() -> tuple[str, str]:
     alphabet = string.ascii_letters + string.digits
     password = "".join(secrets.choice(alphabet) for _ in range(12))
     return f"NetBridge-{suffix}", password
+
+
+def _http_error_message(exc: error.HTTPError) -> str:
+    raw = exc.read().decode("utf-8", errors="replace")
+    detail = raw
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            detail = parsed.get("detail") or parsed.get("error") or raw
+    except Exception:  # noqa: BLE001
+        pass
+    if exc.code in (401, 403):
+        return "Your login expired. Log out, log in again, then tap Start sharing."
+    text = str(detail).strip()
+    return text[:180] if text else f"Cloud sync failed (HTTP {exc.code})."
 
 
 def credentials_match_radio(local: dict, ssid: str, password: str) -> bool:
@@ -560,8 +580,7 @@ class AgentHandler(BaseHTTPRequestHandler):
             try:
                 cloud = sync_cloud(local, token, device_name)
             except error.HTTPError as exc:
-                detail = exc.read().decode("utf-8", errors="replace")
-                self._json(exc.code, {"ok": False, "error": detail, "local": local})
+                self._json(exc.code, {"ok": False, "error": _http_error_message(exc), "local": local})
                 return
             except Exception as exc:  # noqa: BLE001
                 self._json(502, {"ok": False, "error": str(exc), "local": local})
@@ -625,6 +644,7 @@ def main():
     admin = is_admin()
     server = ThreadingHTTPServer((AGENT_HOST, AGENT_PORT), AgentHandler)
     print(f"NetBridge helper listening on http://0.0.0.0:{AGENT_PORT}")
+    print(f"Cloud API: {API_BASE}")
     print(f"Friend join page: http://192.168.137.1:{AGENT_PORT}/join (on your shared WiFi)")
     if WEB_DIST.exists():
         print(f"Serving app from {WEB_DIST}")

@@ -38,7 +38,18 @@ async function agentRequest(path, { method = 'GET', body, token, timeoutMs = 120
 }
 
 function friendlyAgentError(message) {
-  const text = String(message || '')
+  let text = String(message || '')
+  try {
+    const parsed = JSON.parse(text)
+    if (parsed && typeof parsed === 'object') {
+      text = String(parsed.detail || parsed.error || text)
+    }
+  } catch {
+    // not JSON
+  }
+  if (/token|unauthorized|authentication|login expired|credentials were not provided/i.test(text)) {
+    return 'Your login expired. Log out, log in again, then tap Start sharing.'
+  }
   if (/start_agent\.bat|Administrator permission|files on this computer/i.test(text)) {
     return 'Please start the NetBridge helper with Administrator permission so friends only get internet.'
   }
@@ -49,14 +60,14 @@ function friendlyAgentError(message) {
     if (/no internet|internet connection/i.test(text)) {
       return 'Connect this computer to WiFi first, then start sharing.'
     }
-    if (/hotspot|tethering|prepare shared/i.test(text)) {
-      return 'Could not start sharing yet. Try again in a moment.'
+    if (/hotspot|tethering|prepare shared|password did not stick|did not apply|did not accept/i.test(text)) {
+      return text.length > 160 ? 'Could not start sharing. Turn Mobile hotspot Off in Windows Settings, then try again.' : text
     }
     if (/privacy|administrator|nat/i.test(text)) {
       return 'Please start the NetBridge helper with Administrator permission, then try again.'
     }
   }
-  return text.length > 140 ? 'Something went wrong. Please try again.' : text
+  return text.length > 160 ? 'Something went wrong. Please try again.' : text
 }
 
 export const agentApi = {
