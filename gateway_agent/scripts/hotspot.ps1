@@ -16,6 +16,38 @@ $null = [Windows.Networking.Connectivity.NetworkInformation,Windows.Networking.C
 $null = [Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager,Windows.Networking.NetworkOperators,ContentType=WindowsRuntime]
 $null = [Windows.Networking.NetworkOperators.TetheringOperationStatus,Windows.Networking.NetworkOperators,ContentType=WindowsRuntime]
 
+function Await-WinRt($op) {
+  # Prefer real completion; fall back to short poll if AsTask binding is missing.
+  try {
+    $methods = [System.WindowsRuntimeSystemExtensions].GetMethods() |
+      Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 }
+    $paramName = $op.GetType().Name
+    $asTask = $null
+    if ($paramName -like 'IAsyncAction*') {
+      $asTask = $methods | Where-Object { $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncAction' } | Select-Object -First 1
+      if ($asTask) {
+        $task = $asTask.Invoke($null, @($op))
+        $null = $task.GetAwaiter().GetResult()
+        return
+      }
+    }
+    if ($op.GetType().IsGenericType) {
+      $asTaskGeneric = $methods | Where-Object {
+        $_.IsGenericMethod -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'
+      } | Select-Object -First 1
+      if ($asTaskGeneric) {
+        $asTask = $asTaskGeneric.MakeGenericMethod($op.GetType().GenericTypeArguments)
+        $task = $asTask.Invoke($null, @($op))
+        $null = $task.GetAwaiter().GetResult()
+        return
+      }
+    }
+  } catch {
+    # Continue with poll fallback below.
+  }
+  Start-Sleep -Milliseconds 1200
+}
+
 function Start-Tethering([object]$tm) {
   if ([string]$tm.TetheringOperationalState -eq 'On') {
     return
@@ -45,6 +77,21 @@ function Stop-Tethering([object]$tm) {
     Start-Sleep -Milliseconds 500
   }
   throw 'Failed to stop Mobile Hotspot in time.'
+}
+
+function Test-HotspotCredentialsApplied([object]$tm, [string]$expectedSsid, [string]$expectedPassword) {
+  $cfg = $tm.GetCurrentAccessPointConfiguration()
+  $ssidNow = [string]$cfg.Ssid
+  $passNow = ''
+  try { $passNow = [string]$cfg.Passphrase } catch { $passNow = '' }
+  if ($ssidNow -ne $expectedSsid) {
+    return $false
+  }
+  # Some Windows builds hide Passphrase after configure; SSID match is the hard signal.
+  if ($passNow -and $passNow -ne $expectedPassword) {
+    return $false
+  }
+  return $true
 }
 
 function Get-TetheringManager {
@@ -529,19 +576,42 @@ try {
       $Password = -join ((48..57 + 65..90 + 97..122) | Get-Random -Count 12 | ForEach-Object { [char]$_ })
     }
 
+    # Windows ignores SSID/password changes while Mobile Hotspot is already On.
+    # Stop first, then configure, then start — otherwise phones get "incorrect password".
+    if ([string]$tm.TetheringOperationalState -eq 'On') {
+      Stop-Tethering $tm
+      Start-Sleep -Milliseconds 800
+    }
+
+    $cfg = $tm.GetCurrentAccessPointConfiguration()
     $cfg.Ssid = $Ssid
     $cfg.Passphrase = $Password
     $coverage = Optimize-Coverage $cfg
     try {
-      $null = $tm.ConfigureAccessPointAsync($cfg)
-      Start-Sleep -Milliseconds 1000
+      $op = $tm.ConfigureAccessPointAsync($cfg)
+      Await-WinRt $op
     } catch {
       throw "Could not set shared WiFi name/password. Try Start sharing again."
     }
-    $cfg = $tm.GetCurrentAccessPointConfiguration()
+
+    $applied = $false
+    $deadline = (Get-Date).AddSeconds(8)
+    while ((Get-Date) -lt $deadline) {
+      if (Test-HotspotCredentialsApplied $tm $Ssid $Password) {
+        $applied = $true
+        break
+      }
+      Start-Sleep -Milliseconds 400
+    }
+    if (-not $applied) {
+      throw "Windows did not accept the new WiFi password. Open Settings > Network & internet > Mobile hotspot, turn it Off, then tap Start sharing again."
+    }
 
     Start-Tethering $tm
     Start-Sleep -Milliseconds 1000
+    if (-not (Test-HotspotCredentialsApplied $tm $Ssid $Password)) {
+      throw "Shared WiFi started, but the password did not stick. Turn Mobile hotspot Off in Windows Settings, then tap Start sharing again."
+    }
     $privacy = Apply-PrivacyShield -uplinkAlias $uplink.alias
   }
 
@@ -571,7 +641,16 @@ try {
 
   $passphrase = ''
   try { $passphrase = [string]$cfg.Passphrase } catch { $passphrase = '' }
-  if ($Action -eq 'start' -and $Password) { $passphrase = $Password }
+  $credentialsApplied = $false
+  if ($Action -eq 'start' -and $Password -and $Ssid) {
+    # Only advertise the password we verified against the radio (SSID match).
+    if (([string]$cfg.Ssid) -eq $Ssid -and (-not $passphrase -or $passphrase -eq $Password)) {
+      $passphrase = $Password
+      $credentialsApplied = $true
+    } else {
+      throw "Shared WiFi password mismatch after start. Turn Mobile hotspot Off in Windows Settings, then tap Start sharing again."
+    }
+  }
 
   if ($Action -eq 'start' -or ($Action -eq 'status' -and $state -eq 'On')) {
     try {
@@ -597,6 +676,7 @@ try {
     hotspot_state = $state
     hotspot_ssid = $cfg.Ssid
     hotspot_password = $passphrase
+    credentials_applied = [bool]$credentialsApplied
     hotspot_band = [string]$coverage.band
     coverage_optimized = [bool]($coverage.band_forced -or $coverage.tx_power_boosted)
     coverage_notes = [string]$coverage.notes

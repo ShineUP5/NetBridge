@@ -55,6 +55,22 @@ def make_hotspot_credentials() -> tuple[str, str]:
     return f"NetBridge-{suffix}", password
 
 
+def credentials_match_radio(local: dict, ssid: str, password: str) -> bool:
+    """True when Windows reported the same SSID/password we asked it to apply."""
+    if not local.get("ok") or not local.get("hotspot_active"):
+        return False
+    got_ssid = (local.get("hotspot_ssid") or "").strip()
+    got_password = (local.get("hotspot_password") or "").strip()
+    if got_ssid != (ssid or "").strip():
+        return False
+    if got_password and got_password != (password or "").strip():
+        return False
+    # Prefer explicit verification flag from hotspot.ps1 when present.
+    if "credentials_applied" in local and not local.get("credentials_applied"):
+        return False
+    return bool(got_ssid and (got_password or password))
+
+
 def ensure_join_firewall() -> None:
     try:
         subprocess.run(
@@ -459,8 +475,21 @@ class AgentHandler(BaseHTTPRequestHandler):
                     },
                 )
                 return
-            # Always keep explicit password we just set
-            local["hotspot_ssid"] = local.get("hotspot_ssid") or ssid
+            if not credentials_match_radio(local, ssid, password):
+                self._json(
+                    500,
+                    {
+                        "ok": False,
+                        "local": local,
+                        "error": (
+                            "Windows kept a different WiFi password than NetBridge. "
+                            "Open Settings > Mobile hotspot, turn it Off, then Start sharing again."
+                        ),
+                    },
+                )
+                return
+            # Sync only the password Windows actually accepted
+            local["hotspot_ssid"] = ssid
             local["hotspot_password"] = password
             try:
                 cloud = sync_cloud(local, token, device_name)
@@ -497,6 +526,23 @@ class AgentHandler(BaseHTTPRequestHandler):
             if not local.get("hotspot_active"):
                 self._json(500, {"ok": False, "local": local, "error": "Could not start sharing yet. Please try again."})
                 return
+            if not credentials_match_radio(local, ssid, password):
+                self._json(
+                    500,
+                    {
+                        "ok": False,
+                        "local": local,
+                        "error": (
+                            "Windows did not apply the shared WiFi password. "
+                            "Open Settings > Network & internet > Mobile hotspot, turn it Off, "
+                            "then tap Start sharing again."
+                        ),
+                    },
+                )
+                return
+            # Cloud must show the exact radio password phones will use
+            local["hotspot_ssid"] = ssid
+            local["hotspot_password"] = password
             if not (local.get("privacy_shield_active") or (local.get("nat_active") and local.get("hotspot_active"))):
                 self._json(500, {"ok": False, "local": local, "error": "Sharing is not ready yet. Please try again."})
                 return
