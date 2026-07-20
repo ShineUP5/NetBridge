@@ -52,6 +52,19 @@ function Stop-HelperOnPort {
 
 Set-Location $root
 Stop-HelperOnPort -Port $agentPort
+
+# Keep website "Start helper" button working (netbridge://start)
+try {
+  $protocolCmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Normal -File `"$PSCommandPath`""
+  New-Item -Path 'HKCU:\SOFTWARE\Classes\netbridge' -Force | Out-Null
+  Set-ItemProperty -Path 'HKCU:\SOFTWARE\Classes\netbridge' -Name '(default)' -Value 'URL:NetBridge Helper'
+  Set-ItemProperty -Path 'HKCU:\SOFTWARE\Classes\netbridge' -Name 'URL Protocol' -Value ''
+  New-Item -Path 'HKCU:\SOFTWARE\Classes\netbridge\shell\open\command' -Force | Out-Null
+  Set-ItemProperty -Path 'HKCU:\SOFTWARE\Classes\netbridge\shell\open\command' -Name '(default)' -Value $protocolCmd
+} catch {
+  # Non-fatal — install_helper.ps1 can register system-wide instead.
+}
+
 Write-Host ''
 Write-Host 'NetBridge helper starting with Administrator protection...'
 Write-Host "Keep this window open. Gateway page: http://127.0.0.1:$agentPort"

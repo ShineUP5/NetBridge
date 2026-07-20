@@ -265,6 +265,10 @@ export default function GatewayPage() {
           onConnect={handleConnect}
           onDisconnect={handleDisconnect}
           loading={busy === 'connect' || busy === 'disconnect'}
+          onHelperReady={() => {
+            setAgentOnline(true)
+            refresh()
+          }}
         />
         <JoinLinkPanel status={status} />
         <CoveragePanel status={status} />

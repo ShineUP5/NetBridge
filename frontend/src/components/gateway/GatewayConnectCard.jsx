@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Button } from '../Button'
 import { StatusBadge } from '../StatusBadge'
+import {
+  downloadHelperSetup,
+  helperWasInstalled,
+  launchHelperProtocol,
+  markHelperInstalled,
+  waitForHelper,
+} from '../../utils/helperLaunch'
+import { agentApi } from '../../api/agent'
 
 export function GatewayConnectCard({
   status,
@@ -8,14 +16,44 @@ export function GatewayConnectCard({
   onConnect,
   onDisconnect,
   loading,
+  onHelperReady,
 }) {
   const [deviceName, setDeviceName] = useState(status?.device_name || 'My PC')
+  const [helperBusy, setHelperBusy] = useState(false)
+  const [helperMsg, setHelperMsg] = useState('')
 
   useEffect(() => {
     if (status?.device_name) setDeviceName(status.device_name)
   }, [status?.device_name])
 
+  useEffect(() => {
+    if (agentOnline) markHelperInstalled()
+  }, [agentOnline])
+
   const live = Boolean(status?.is_live || (status?.is_connected && status?.hotspot_active))
+
+  async function handleStartHelper() {
+    setHelperBusy(true)
+    setHelperMsg('Opening helper… click Yes if Windows asks for permission.')
+    launchHelperProtocol()
+    const ok = await waitForHelper(() => agentApi.health(), { timeoutMs: 28000 })
+    if (ok) {
+      setHelperMsg('Helper is running. You can start sharing now.')
+      onHelperReady?.()
+    } else {
+      setHelperMsg(
+        'Helper did not start yet. Tap “Install helper once”, run that file, then tap Start helper again.',
+      )
+    }
+    setHelperBusy(false)
+  }
+
+  function handleInstallOnce() {
+    downloadHelperSetup()
+    setHelperMsg(
+      'Download started. Run Setup-NetBridge-Helper.bat once (click Yes), then come back and tap Start helper.',
+    )
+  }
 
   if (live) {
     return (
@@ -75,17 +113,25 @@ export function GatewayConnectCard({
       </p>
 
       {!agentOnline ? (
-        <p className="info banner">
-          Please start the NetBridge helper first. Double-click
-          {' '}
-          <code>gateway_agent\start_agent.bat</code>
-          {' '}
-          and allow Administrator permission.
-        </p>
+        <div className="helper-launch">
+          <p className="info banner">
+            The helper must run on this PC (one black window). Tap the button below — no need to dig through folders each time.
+          </p>
+          <div className="helper-actions">
+            <Button type="button" disabled={helperBusy || loading} onClick={handleStartHelper}>
+              {helperBusy ? 'Starting helper…' : 'Start helper'}
+            </Button>
+            <Button type="button" variant="ghost" disabled={helperBusy} onClick={handleInstallOnce}>
+              {helperWasInstalled() ? 'Reinstall helper' : 'Install helper once'}
+            </Button>
+          </div>
+          {helperMsg ? <p className="muted helper-msg">{helperMsg}</p> : null}
+          <p className="muted">
+            First time only: Install helper once → click Yes → then Start helper whenever you share.
+          </p>
+        </div>
       ) : (
-        <p className="muted">
-          Helper is ready. Friends will only get internet, not your files.
-        </p>
+        <p className="muted">Helper is ready. Friends will only get internet, not your files.</p>
       )}
 
       <label>
