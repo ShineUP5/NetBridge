@@ -7,6 +7,7 @@ import { FormField } from '../components/FormField'
 import { RolePicker } from '../components/RolePicker'
 import { Shell } from '../components/Shell'
 import { roleHome, useAuth } from '../context/AuthContext'
+import { buildLocalGatewayUrl, isPublicHostedSite, redirectToLocalGateway } from '../utils/localGateway'
 
 const INITIAL = {
   role: 'gateway',
@@ -29,6 +30,12 @@ export default function SignupPage() {
   }, [])
 
   useEffect(() => {
+    if (user?.role === 'gateway' && isPublicHostedSite()) {
+      redirectToLocalGateway()
+    }
+  }, [user])
+
+  useEffect(() => {
     if (!loading) {
       setWaitHint('')
       return undefined
@@ -41,7 +48,16 @@ export default function SignupPage() {
     }
   }, [loading])
 
-  if (user) return <Navigate to={roleHome(user.role)} replace />
+  if (user) {
+    if (user.role === 'gateway' && isPublicHostedSite()) {
+      return (
+        <Shell narrow>
+          <p className="lead">Opening SERVER dashboard on this PC…</p>
+        </Shell>
+      )
+    }
+    return <Navigate to={roleHome(user.role)} replace />
+  }
 
   function setField(key) {
     return (e) => setForm((prev) => ({ ...prev, [key]: e.target.value }))
@@ -53,6 +69,10 @@ export default function SignupPage() {
     setLoading(true)
     try {
       const data = await signup(form)
+      if (data.user.role === 'gateway' && isPublicHostedSite()) {
+        redirectToLocalGateway(data)
+        return
+      }
       navigate(roleHome(data.user.role))
     } catch (err) {
       setError(err.message)

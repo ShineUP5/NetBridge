@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
+import { consumeUrlAuthBootstrap } from '../utils/localGateway'
 
 const AuthContext = createContext(null)
 const STORAGE_KEY = 'netbridge_auth'
@@ -13,8 +14,12 @@ function loadStored() {
   }
 }
 
+function initialAuth() {
+  return loadStored() || consumeUrlAuthBootstrap()
+}
+
 export function AuthProvider({ children }) {
-  const [auth, setAuth] = useState(() => loadStored())
+  const [auth, setAuth] = useState(() => initialAuth())
   const [booting, setBooting] = useState(true)
 
   useEffect(() => {

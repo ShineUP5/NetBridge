@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { agentApi } from '../api/agent'
 import { gatewayApi } from '../api/gateway'
@@ -13,10 +13,18 @@ import { Shell } from '../components/Shell'
 import { Topbar } from '../components/Topbar'
 import { useAuth } from '../context/AuthContext'
 import { usePolling } from '../hooks/usePolling'
+import { buildLocalGatewayUrl, isPublicHostedSite, redirectToLocalGateway } from '../utils/localGateway'
 import { sessionMinutesPayload } from '../utils/sessionOptions'
 
 export default function GatewayPage() {
   const { user, token, booting, logout } = useAuth()
+
+  useEffect(() => {
+    if (!booting && user?.role === 'gateway' && isPublicHostedSite()) {
+      redirectToLocalGateway()
+    }
+  }, [booting, user])
+
   const [status, setStatus] = useState(null)
   const [agentOnline, setAgentOnline] = useState(false)
   const [invite, setInvite] = useState(null)
@@ -95,7 +103,8 @@ export default function GatewayPage() {
   }, [token, rotateWifiPassword, agentOnline])
 
   const pollMs = pending.length ? 7000 : 14000
-  usePolling(refresh, pollMs, Boolean(token && user?.role === 'gateway'))
+  const onLocalDashboard = !isPublicHostedSite()
+  usePolling(refresh, pollMs, Boolean(token && user?.role === 'gateway' && onLocalDashboard))
 
   async function handleConnect(deviceName) {
     setBusy('connect')
@@ -250,6 +259,24 @@ export default function GatewayPage() {
   }
   if (!user) return <Navigate to="/login" replace />
   if (user.role !== 'gateway') return <Navigate to="/dependant" replace />
+
+  if (isPublicHostedSite()) {
+    return (
+      <Shell narrow>
+        <h1>Opening SERVER dashboard</h1>
+        <p className="lead">
+          Chrome blocks the website from talking to the helper on this PC. Use the local
+          dashboard instead.
+        </p>
+        <p className="muted">
+          Make sure the NetBridge helper is running (<code>start_agent.bat</code>), then open:
+        </p>
+        <p>
+          <a href={buildLocalGatewayUrl()}>{buildLocalGatewayUrl()}</a>
+        </p>
+      </Shell>
+    )
+  }
 
   const sharingReady = Boolean(
     status?.is_connected && status?.hotspot_active && (status?.hotspot_ssid || status?.is_live),

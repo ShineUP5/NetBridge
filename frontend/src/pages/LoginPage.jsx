@@ -6,6 +6,7 @@ import { Button } from '../components/Button'
 import { FormField } from '../components/FormField'
 import { Shell } from '../components/Shell'
 import { roleHome, useAuth } from '../context/AuthContext'
+import { buildLocalGatewayUrl, isPublicHostedSite, redirectToLocalGateway } from '../utils/localGateway'
 
 export default function LoginPage() {
   const { login, user } = useAuth()
@@ -20,6 +21,12 @@ export default function LoginPage() {
   }, [])
 
   useEffect(() => {
+    if (user?.role === 'gateway' && isPublicHostedSite()) {
+      redirectToLocalGateway()
+    }
+  }, [user])
+
+  useEffect(() => {
     if (!loading) {
       setWaitHint('')
       return undefined
@@ -32,7 +39,19 @@ export default function LoginPage() {
     }
   }, [loading])
 
-  if (user) return <Navigate to={roleHome(user.role)} replace />
+  if (user) {
+    if (user.role === 'gateway' && isPublicHostedSite()) {
+      return (
+        <Shell narrow>
+          <p className="lead">Opening SERVER dashboard on this PC…</p>
+          <Button type="button" onClick={() => redirectToLocalGateway()}>
+            Open dashboard
+          </Button>
+        </Shell>
+      )
+    }
+    return <Navigate to={roleHome(user.role)} replace />
+  }
 
   function setField(key) {
     return (e) => setForm((prev) => ({ ...prev, [key]: e.target.value }))
@@ -44,6 +63,10 @@ export default function LoginPage() {
     setLoading(true)
     try {
       const data = await login(form)
+      if (data.user.role === 'gateway' && isPublicHostedSite()) {
+        redirectToLocalGateway(data)
+        return
+      }
       navigate(roleHome(data.user.role))
     } catch (err) {
       setError(err.message)
@@ -58,6 +81,13 @@ export default function LoginPage() {
         <Brand />
         <h1>Log in</h1>
         <p className="lead">Phone number and password.</p>
+        {isPublicHostedSite() ? (
+          <p className="muted">
+            SERVER accounts open the dashboard on this PC at{' '}
+            <a href={buildLocalGatewayUrl()}>127.0.0.1:8765</a> after login (keeps the helper
+            working in Chrome).
+          </p>
+        ) : null}
 
         <FormField
           label="Phone number"
