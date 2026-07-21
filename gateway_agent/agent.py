@@ -19,6 +19,7 @@ import sys
 import threading
 import time
 from dns_proxy import start_dns_proxy
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib import error, parse, request
 from urllib.error import HTTPError, URLError
