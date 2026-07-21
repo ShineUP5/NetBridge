@@ -199,6 +199,9 @@ function Ensure-IcsService {
   if (-not $svc) {
     return $false
   }
+  try {
+    Set-Service -Name SharedAccess -StartupType Automatic -ErrorAction SilentlyContinue
+  } catch { }
   if ($svc.Status -ne 'Running') {
     try {
       Start-Service SharedAccess -ErrorAction Stop
@@ -207,6 +210,72 @@ function Ensure-IcsService {
     }
   }
   return $true
+}
+
+function Enable-IcsPairing {
+  param(
+    [string]$PublicAdapterName
+  )
+  $privateAdapter = @(Get-ShareAdapters | Select-Object -First 1)
+  if (-not $privateAdapter -or -not $PublicAdapterName) {
+    return $false
+  }
+
+  $privateName = [string]$privateAdapter.Name
+  try {
+    $netShare = New-Object -ComObject HNetCfg.HNetShare
+    $publicConn = $null
+    $privateConn = $null
+
+    foreach ($conn in @($netShare.EnumEveryConnection())) {
+      $props = $netShare.NetConnectionProps($conn)
+      $name = [string]$props.Name
+      if ($name -eq $PublicAdapterName) { $publicConn = $conn }
+      if ($name -eq $privateName) { $privateConn = $conn }
+    }
+
+    if (-not $privateConn) {
+      foreach ($conn in @($netShare.EnumEveryConnection())) {
+        $props = $netShare.NetConnectionProps($conn)
+        $name = [string]$props.Name
+        if ($name -match 'Local Area Connection\*|Wi-Fi Direct|Direct Virtual') {
+          $privateConn = $conn
+          break
+        }
+      }
+    }
+
+    if (-not $publicConn -or -not $privateConn) {
+      return $false
+    }
+
+    foreach ($conn in @($publicConn, $privateConn)) {
+      try {
+        $cfg = $netShare.INetSharingConfigurationForINetConnection($conn)
+        if ($cfg.SharingEnabled) { $cfg.DisableSharing() }
+      } catch { }
+    }
+
+    Start-Sleep -Milliseconds 500
+    $pubCfg = $netShare.INetSharingConfigurationForINetConnection($publicConn)
+    $privCfg = $netShare.INetSharingConfigurationForINetConnection($privateConn)
+    # 0 = public (internet), 1 = private (hotspot clients)
+    $pubCfg.EnableSharing(0, 100)
+    $privCfg.EnableSharing(1, 100)
+    return $true
+  } catch {
+    return $false
+  }
+}
+
+function Repair-SharedAccess {
+  try {
+    Restart-Service SharedAccess -Force -ErrorAction Stop
+    Start-Sleep -Seconds 2
+    return $true
+  } catch {
+    return $false
+  }
 }
 
 function Disable-Ipv6OnAdapter([string]$alias) {
@@ -461,6 +530,8 @@ function Get-PrivacyStatusQuick([string]$uplinkAlias) {
     client_isolation_active = [bool]$isolationActive
     ics_running = [bool]$icsRunning
     share_adapter_count = $shareAdapters.Count
+    dns_active = $false
+    ics_paired = $false
     notes = ($notes -join ' ')
   }
 }
@@ -481,8 +552,21 @@ function Apply-PrivacyShield([string]$uplinkAlias) {
     $notes.Add('Start the NetBridge helper with Administrator permission to protect your files.')
   }
 
+  $icsPaired = $false
+  if ($uplinkAlias) {
+    $icsPaired = Enable-IcsPairing -PublicAdapterName $uplinkAlias
+    if ($icsPaired) {
+      $notes.Add('Windows internet sharing (ICS) linked hotspot to your WiFi.')
+    }
+  }
+
   $natHelp = Ensure-ClientInternet -uplinkAlias $uplinkAlias
   if ($natHelp.notes) { $notes.Add($natHelp.notes) }
+
+  if (-not $icsPaired) {
+    $repaired = Repair-SharedAccess
+    if ($repaired) { $notes.Add('Restarted internet sharing service for hotspot clients.') }
+  }
 
   $shareAdapters = @(Get-ShareAdapters)
   foreach ($adapter in $shareAdapters) {
@@ -502,6 +586,8 @@ function Apply-PrivacyShield([string]$uplinkAlias) {
     client_isolation_active = [bool]$isolationActive
     ics_running = [bool]$icsRunning
     share_adapter_count = $shareAdapters.Count
+    dns_active = [bool]$natHelp.dns
+    ics_paired = [bool]$icsPaired
     notes = ($notes -join ' ')
   }
 }
@@ -751,6 +837,8 @@ try {
     gateway_lan_ip = $shareIp
     client_count = $tm.ClientCount
     max_clients = $tm.MaxClientCount
+    dns_active = [bool]$privacy.dns_active
+    ics_paired = [bool]$privacy.ics_paired
     share_mode = 'windows_mobile_hotspot_nat'
     nat_active = [bool]$privacy.nat_active
     ipv6_leak_blocked = [bool]$privacy.ipv6_leak_blocked

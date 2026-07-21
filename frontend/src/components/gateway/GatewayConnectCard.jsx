@@ -125,8 +125,9 @@ export function GatewayConnectCard({
         </ul>
         <p className="muted">
           Approved friends receive this WiFi name and password to get real internet.
-          If a phone says “Connected without internet”, on that phone open the NetBridge
-          WiFi settings → Advanced → set DNS to 8.8.8.8 and 8.8.4.4, then retry.
+          If phones show “Connected without internet”, have them set DNS to 8.8.8.8 on that
+          WiFi. Voucher WiFi (sign-in networks like HOLY SPOT) may block sharing — Ethernet
+          or a normal home router works best.
         </p>
         <Button variant="ghost" disabled={loading} onClick={onDisconnect}>
           {loading ? 'Stopping…' : 'Stop sharing'}

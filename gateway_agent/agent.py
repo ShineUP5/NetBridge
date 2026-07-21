@@ -18,7 +18,7 @@ import subprocess
 import sys
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from dns_proxy import start_dns_proxy
 from pathlib import Path
 from urllib import error, parse, request
 from urllib.error import HTTPError, URLError
@@ -719,6 +719,8 @@ def main():
 
     ensure_join_firewall()
     admin = is_admin()
+    if admin:
+        start_dns_proxy()
     server = ThreadingHTTPServer((AGENT_HOST, AGENT_PORT), AgentHandler)
     print(f"NetBridge helper listening on http://0.0.0.0:{AGENT_PORT}")
     print(f"Cloud API: {API_BASE}")
@@ -729,6 +731,7 @@ def main():
         print("Run 'npm run build' inside frontend so friends can open /join offline.")
     if admin:
         print("Protection mode: friends get internet only.")
+        print("DNS forwarder: hotspot clients can use this PC for DNS (UDP/53).")
     else:
         print("Tip: use gateway_agent\\start_agent.bat as Administrator for full protection.")
     try:

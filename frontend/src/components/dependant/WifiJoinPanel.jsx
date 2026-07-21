@@ -76,6 +76,12 @@ export function WifiJoinPanel({ wifi }) {
         You are approved. Join this WiFi on your phone to use your friend’s internet.
       </p>
 
+      <p className="info banner">
+        Phone shows “Connected without internet”? On the WiFi settings for this network, set
+        DNS manually to <strong>8.8.8.8</strong> and <strong>8.8.4.4</strong>, then wait 15
+        seconds and tap Test internet below.
+      </p>
+
       <ol className="wifi-steps">
         <li>Turn off mobile data on this phone (so it must use WiFi)</li>
         <li>Open WiFi settings and join the network below</li>
