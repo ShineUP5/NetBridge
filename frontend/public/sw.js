@@ -1,5 +1,5 @@
 /* NetBridge offline shell — keeps join/dependant pages available without internet */
-const CACHE = 'netbridge-v3'
+const CACHE = 'netbridge-v4'
 const PRECACHE = [
   '/',
   '/index.html',
@@ -47,16 +47,18 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // JS/CSS assets: network only — never fall back to HTML (MIME module errors)
+  // JS/CSS assets: network first, cache fallback on failure
   if (isAssetRequest(url.pathname)) {
     event.respondWith(
-      fetch(request).then((response) => {
-        if (response && response.ok && response.type === 'basic') {
-          const clone = response.clone()
-          caches.open(CACHE).then((cache) => cache.put(request, clone))
-        }
-        return response
-      }),
+      fetch(request)
+        .then((response) => {
+          if (response && response.ok && response.type === 'basic') {
+            const clone = response.clone()
+            caches.open(CACHE).then((cache) => cache.put(request, clone))
+          }
+          return response
+        })
+        .catch(() => caches.match(request).then((cached) => cached || Response.error())),
     )
     return
   }
