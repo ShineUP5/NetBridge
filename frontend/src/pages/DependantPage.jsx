@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { dependantApi } from '../api/dependant'
+import { getJoinPageUrl, isOnHelperApp } from '../api/client'
 import { ConnectionStatusPanel } from '../components/dependant/ConnectionStatusPanel'
 import { ConnectCodeForm } from '../components/dependant/ConnectCodeForm'
 import { WifiJoinPanel } from '../components/dependant/WifiJoinPanel'
@@ -33,11 +34,13 @@ export default function DependantPage() {
   async function handleConnect(code) {
     setLoading(true)
     setError('')
-    setInfo('')
+    setInfo('Waking server… first try can take up to a minute.')
     try {
       const data = await dependantApi.requestConnect(token, code)
       setConnection(data)
+      setInfo('Request sent. Wait for your friend to approve you on their SERVER page.')
     } catch (err) {
+      setInfo('')
       setError(err.message)
     } finally {
       setLoading(false)
@@ -90,6 +93,13 @@ export default function DependantPage() {
         <p className="lead">
           Enter their code, wait for approval, then join their WiFi for real internet.
         </p>
+        {!isOnHelperApp() ? (
+          <p className="muted">
+            On your friend&apos;s shared WiFi? Open{' '}
+            <a href={getJoinPageUrl()}>{getJoinPageUrl()}</a> on this phone first — the
+            normal website may not work without internet.
+          </p>
+        ) : null}
         {error ? <p className="error banner">{error}</p> : null}
         {info ? <p className="info banner">{info}</p> : null}
       </section>

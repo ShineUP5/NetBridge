@@ -16,6 +16,9 @@ export function ConnectCodeForm({ onSubmit, loading, disabled }) {
         <h2>Enter code</h2>
       </div>
       <p className="lead">Type the invite code from your friend.</p>
+      <p className="muted">
+        Codes expire in about 2 minutes. If sending fails, refresh and ask for a new code.
+      </p>
       <form className="stack dependant-form" onSubmit={handleSubmit}>
         <FormField
           className="invite-code-field"
