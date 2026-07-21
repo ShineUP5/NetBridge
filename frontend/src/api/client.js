@@ -1,26 +1,32 @@
-export function getApiBase() {
-  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL
+const RENDER_API = 'https://netbridge-d5l8.onrender.com/api'
 
-  if (typeof window !== 'undefined') {
-    const { protocol, hostname, port } = window.location
-    // Served by gateway helper — phone has no upstream internet, API is proxied locally
-    if (port === '8765' || hostname === '192.168.137.1') {
-      return `${protocol}//${hostname}${port ? `:${port}` : ''}/api`
-    }
+function isHelperOrigin() {
+  if (typeof window === 'undefined') return false
+  const { hostname, port } = window.location
+  if (port === '8765') return true
+  if (hostname === '192.168.137.1') return true
+  return false
+}
+
+export function getApiBase() {
+  // Helper serves the app and proxies /api → Render (works on PC and on hotspot phones).
+  if (isHelperOrigin()) {
+    return `${window.location.origin}/api`
   }
 
-  return 'http://127.0.0.1:8000/api'
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL.replace(/\/$/, '')
+  }
+
+  return RENDER_API
 }
 
 export function getAgentBase() {
-  if (import.meta.env.VITE_AGENT_URL) return import.meta.env.VITE_AGENT_URL
-
-  if (typeof window !== 'undefined') {
-    const { protocol, hostname, port } = window.location
-    if (port === '8765') {
-      return `${protocol}//${hostname}:8765`
-    }
+  if (isHelperOrigin()) {
+    return window.location.origin
   }
+
+  if (import.meta.env.VITE_AGENT_URL) return import.meta.env.VITE_AGENT_URL
 
   return 'http://127.0.0.1:8765'
 }
